@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 # TODO:
-# * Enforce Python version.(Needs 3.9(?) for argparse.BooleanOptionalAction)
 # * Documentation.
 # * Error messages.
 # * Refactor.
@@ -19,6 +18,11 @@ import sys
 import typing
 
 import gvutils
+
+
+# 3.9.0 is required for `argparse.BooleanOptionalAction`.
+if not gvutils.has_python_version(__file__, (3, 9, 0)):
+    sys.exit(1)
 
 
 def main(argv: typing.List[str]) -> int:

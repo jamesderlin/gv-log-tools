@@ -20,6 +20,23 @@ map_file_re = re.compile("".join(
 )
 
 
+def has_python_version(
+    script_file: str,
+    version_tuple: typing.Tuple[int, ...],
+) -> bool:
+    """
+    Returns `True` if the Python version is greater than or equal to the
+    specified version, `False` otherwise.
+    """
+    if sys.version_info < version_tuple:
+        print("{name}: Requires Python {version} or newer."
+              .format(name=script_file,
+                      version=".".join((str(i) for i in version_tuple))),
+              file=sys.stderr)
+        return False
+    return True
+
+
 class AbortError(Exception):
     """
     A simple exception class to abort program execution.
