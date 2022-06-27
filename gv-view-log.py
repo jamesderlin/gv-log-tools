@@ -42,10 +42,7 @@ def main(argv: typing.List[str]) -> int:
 
     query = args.name
 
-    config_file_path = (args.config_file_path
-                        or os.path.expanduser("~/.config/gv-tools/gv-tools.rc"))
-
-    config = gvutils.Config(config_file_path)
+    config = gvutils.Config(args.config_file_path)
 
     log_directory = args.log_directory or config.log_directory or "."
     if not os.path.isdir(log_directory):
@@ -85,7 +82,8 @@ def main(argv: typing.List[str]) -> int:
             found.append(device)
 
     if not found:
-        print(f"\"{query}\" not found in {config_file_path}", file=sys.stderr)
+        print(f"\"{query}\" not found in {config.config_file_path}",
+              file=sys.stderr)
         return 1
 
     response = python_cli_utils.numbered_choices_prompt(
@@ -143,7 +141,7 @@ def main(argv: typing.List[str]) -> int:
                 degrees = centigrade
                 unit_symbol = "C"
             else:
-                degrees = gvutils.centigrade_to_fahrenheit(centigrade)
+                degrees = gvutils.fahrenheit_from_centigrade(centigrade)
                 unit_symbol = "F"
             humidity = float(m.group("humidity"))
             battery = int(m.group("battery"))

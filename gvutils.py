@@ -36,23 +36,34 @@ class DeviceConfig:
                 else self.address)
 
     def short_address(self) -> str:
+        """
+        Removes the `:` separators between octets in the Bluetooth address.
+        """
         return self.address.replace(":", "")
 
 
 class Config:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: typing.Optional[str]) -> None:
+        """
+        Initializes a `Config` object from a path to the specified
+        configuration file.
+
+        The specified file may either be a GoveeBTTempLogger `gvh-titlemap.txt`
+        file or a `gv-tools.rc` `.ini`-like file.
+
+        If no path is specified, uses the default configuration file path.
+        """
+        self.config_file_path = \
+            path or os.path.expanduser("~/.config/gv-tools/gv-tools.rc")
         self.log_directory = ""
         self.devices: typing.OrderedDict[str, DeviceConfig] = {}
 
-        if not os.path.isfile(path):
+        if not os.path.isfile(self.config_file_path):
             return
 
-        # Try to parse the config file first in GoveeBTTempLogger's
-        # `gvh-titlemap.txt` format, which consists of lines the form:
-        # ```
-        # ADDRESS NAME
-        # ```
-        with open(path) as f:
+        with open(self.config_file_path) as f:
+            # Try to parse the config file first as GoveeBTTempLogger's
+            # `gvh-titlemap.txt` format.
             device_configs = parse_map_file(f)
             if device_configs is not None:
                 self.devices = device_configs
@@ -62,7 +73,7 @@ class Config:
             self.devices.clear()
             f.seek(0)
             cp = configparser.ConfigParser(interpolation=None)
-            cp.read_file(f, source=path)
+            cp.read_file(f, source=self.config_file_path)
 
         if cp.has_section("config"):
             main_section = cp["config"]
@@ -85,16 +96,21 @@ class Config:
 
 
 def parse_map_file(
-    f: typing.TextIO,
+    file: typing.TextIO,
 ) -> typing.Optional[typing.OrderedDict[str, DeviceConfig]]:
+    """
+    Tries to parse the specified file stream as GoveeBTTempLogger's
+    `gvh-titlemap.txt` format, which consists of lines of the form:
+
+    ```
+    ADDRESS\tNAME
+    ```
+
+    Returns `None` on parsing failure.
+    """
     device_configs: typing.OrderedDict[str, DeviceConfig] = {}
 
-    # Try to parse the config file first in GoveeBTTempLogger's
-    # `gvh-titlemap.txt` format, which consists of lines the form:
-    # ```
-    # ADDRESS NAME
-    # ```
-    for line in f:
+    for line in file:
         if whitespace_re.fullmatch(line):
             continue
 
@@ -110,8 +126,11 @@ def parse_map_file(
 
 
 def chunk_address(address: str) -> str:
+    """Inserts `:` separators between each octet of a Bluetooth address."""
+    assert(len(address) == 12)
     return ":".join((address[i : (i + 2)] for i in range(0, len(address), 2)))
 
 
-def centigrade_to_fahrenheit(degrees_c):
+def fahrenheit_from_centigrade(degrees_c):
+    """Converts a temperature from degrees centigrade to degrees Fahrenheit."""
     return degrees_c * 9 / 5 + 32
