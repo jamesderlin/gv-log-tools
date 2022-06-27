@@ -11,7 +11,6 @@ TODO: Documentation
 """
 
 import argparse
-import configparser
 import datetime
 import os
 import python_cli_utils
@@ -19,113 +18,7 @@ import re
 import sys
 import typing
 
-
-bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
-whitespace_re = re.compile(r"\s+")
-map_file_re = re.compile("".join(
-    (r"(?P<address>",
-     bluetooth_address_re.pattern,
-     r")",
-     r"(?:\s+(?P<name>.*))?\s*"),
-    ),
-)
-
-
-class DeviceConfig:
-    def __init__(
-        self,
-        *,
-        address: str,
-        name: typing.Optional[str] = None,
-    ) -> None:
-        self.address = address.upper()
-        self.name = name
-
-    def __str__(self) -> str:
-        return (f"{self.name} ({self.address})"
-                if self.name
-                else self.address)
-
-    def short_address(self) -> str:
-        return self.address.replace(":", "")
-
-
-class Config:
-    def __init__(self, path: str) -> None:
-        self.log_directory = ""
-        self.devices: typing.OrderedDict[str, DeviceConfig] = {}
-
-        if not os.path.isfile(path):
-            return
-
-        # Try to parse the config file first in GoveeBTTempLogger's
-        # `gvh-titlemap.txt` format, which consists of lines the form:
-        # ```
-        # ADDRESS NAME
-        # ```
-        with open(path) as f:
-            device_configs = parse_map_file(f)
-            if device_configs is not None:
-                self.devices = device_configs
-                return
-
-            # Try to parse the config file as an `.ini`-like file.
-            self.devices.clear()
-            f.seek(0)
-            cp = configparser.ConfigParser(interpolation=None)
-            cp.read_file(f, source=path)
-
-        if cp.has_section("config"):
-            main_section = cp["config"]
-            self.log_directory = main_section.get("log_directory", "")
-
-            map_file = main_section.get("map_file", "")
-            if map_file:
-                with open(map_file) as f:
-                    self.devices = parse_map_file(f)
-
-        for section_name in cp:
-            if not bluetooth_address_re.fullmatch(section_name):
-                continue
-            address = section_name
-            name = cp[section_name].get("name")
-
-            # Device names from the map file take precedence.
-            self.devices.setdefault(address, DeviceConfig(address=address,
-                                                          name=name))
-
-
-def parse_map_file(
-    f: typing.TextIO,
-) -> typing.Optional[typing.OrderedDict[str, DeviceConfig]]:
-    device_configs: typing.OrderedDict[str, DeviceConfig] = {}
-
-    # Try to parse the config file first in GoveeBTTempLogger's
-    # `gvh-titlemap.txt` format, which consists of lines the form:
-    # ```
-    # ADDRESS NAME
-    # ```
-    for line in f:
-        if whitespace_re.fullmatch(line):
-            continue
-
-        m = map_file_re.fullmatch(line)
-        if not m:
-            return None
-        name = m.group("name")
-        address = m.group("address")
-        if name and address:
-            device_configs[address] = DeviceConfig(address=address, name=name)
-
-    return device_configs
-
-
-def chunk_address(address: str) -> str:
-    return ":".join((address[i : (i + 2)] for i in range(0, len(address), 2)))
-
-
-def centigrade_to_fahrenheit(degrees_c):
-    return degrees_c * 9 / 5 + 32
+import gvutils
 
 
 def main(argv: typing.List[str]) -> int:
@@ -152,7 +45,7 @@ def main(argv: typing.List[str]) -> int:
     config_file_path = (args.config_file_path
                         or os.path.expanduser("~/.config/gv-tools/gv-tools.rc"))
 
-    config = Config(config_file_path)
+    config = gvutils.Config(config_file_path)
 
     log_directory = args.log_directory or config.log_directory or "."
     if not os.path.isdir(log_directory):
@@ -180,13 +73,13 @@ def main(argv: typing.List[str]) -> int:
         # Merge found addresses into the ones specified by the configuration
         # file.
         for address in sorted(addresses):
-            chunked = chunk_address(address)
+            chunked = gvutils.chunk_address(address)
             if chunked in config.devices:
                 continue
-            config.devices[chunked] = DeviceConfig(address=chunked)
+            config.devices[chunked] = gvutils.DeviceConfig(address=chunked)
 
     q = query.lower()
-    found: typing.List[DeviceConfig] = []
+    found: typing.List[gvutils.DeviceConfig] = []
     for device in config.devices.values():
         if q in str(device).lower():
             found.append(device)
@@ -250,7 +143,7 @@ def main(argv: typing.List[str]) -> int:
                 degrees = centigrade
                 unit_symbol = "C"
             else:
-                degrees = centigrade_to_fahrenheit(centigrade)
+                degrees = gvutils.centigrade_to_fahrenheit(centigrade)
                 unit_symbol = "F"
             humidity = float(m.group("humidity"))
             battery = int(m.group("battery"))
