@@ -15,77 +15,114 @@ import argparse
 import configparser
 import datetime
 import os
+import python_cli_utils
 import re
 import sys
 import typing
 
+
+bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
+whitespace_re = re.compile(r"\s+")
+map_file_re = re.compile("".join(
+    (r"(?P<address>",
+     bluetooth_address_re.pattern,
+     r")",
+     r"(?:\s+(?P<name>.*))?\s*"),
+    ),
+)
+
+
 class DeviceConfig:
-    def __init__(self, *, address, name=None):
+    def __init__(
+        self,
+        *,
+        address: str,
+        name: typing.Optional[str] = None,
+    ) -> None:
         self.address = address.upper()
         self.name = name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (f"{self.name} ({self.address})"
                 if self.name
                 else self.address)
 
-    def short_address(self):
+    def short_address(self) -> str:
         return self.address.replace(":", "")
 
 
-def centigrade_to_fahrenheit(degrees_c):
-    return degrees_c * 9 / 5 + 32
+class Config:
+    def __init__(self, path: str) -> None:
+        self.log_directory = ""
+        self.devices: typing.OrderedDict[str, DeviceConfig] = {}
+
+        if not os.path.isfile(path):
+            return
+
+        # Try to parse the config file first in GoveeBTTempLogger's
+        # `gvh-titlemap.txt` format, which consists of lines the form:
+        # ```
+        # ADDRESS NAME
+        # ```
+        with open(path) as f:
+            device_configs = parse_map_file(f)
+            if device_configs is not None:
+                self.devices = device_configs
+                return
+
+            # Try to parse the config file as an `.ini`-like file.
+            self.devices.clear()
+            f.seek(0)
+            cp = configparser.ConfigParser(interpolation=None)
+            cp.read_file(f, source=path)
+
+        if cp.has_section("config"):
+            main_section = cp["config"]
+            self.log_directory = main_section.get("log_directory", "")
+
+            map_file = main_section.get("map_file", "")
+            if map_file:
+                with open(map_file) as f:
+                    self.devices = parse_map_file(f)
+
+        for section_name in cp:
+            if not bluetooth_address_re.fullmatch(section_name):
+                continue
+            address = section_name
+            name = cp[section_name].get("name")
+
+            # Device names from the map file take precedence.
+            self.devices.setdefault(address, DeviceConfig(address=address,
+                                                          name=name))
 
 
-def parse_config_file(path: str) -> typing.List[DeviceConfig]:
-    bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
-    whitespace_re = re.compile(r"\s+")
-    map_file_re = re.compile("".join(
-        (r"(?P<address>",
-         bluetooth_address_re.pattern,
-         r")",
-         r"(?:\s+(?P<name>.*))?\s*"),
-        ),
-    )
-
-    device_configs: typing.List[DeviceConfig] = []
+def parse_map_file(
+    f: typing.TextIO,
+) -> typing.Optional[typing.OrderedDict[str, DeviceConfig]]:
+    device_configs: typing.OrderedDict[str, DeviceConfig] = {}
 
     # Try to parse the config file first in GoveeBTTempLogger's
     # `gvh-titlemap.txt` format, which consists of lines the form:
     # ```
     # ADDRESS NAME
     # ```
-    is_simple_config_file = True
-    with open(path) as f:
-        for line in f:
-            if whitespace_re.fullmatch(line):
-                continue
+    for line in f:
+        if whitespace_re.fullmatch(line):
+            continue
 
-            m = map_file_re.fullmatch(line)
-            if not m:
-                is_simple_config_file = False
-                break
-            name = m.group("name")
-            address = m.group("address")
-            if name and address:
-                device_configs.append(DeviceConfig(address=address, name=name))
+        m = map_file_re.fullmatch(line)
+        if not m:
+            return None
+        name = m.group("name")
+        address = m.group("address")
+        if name and address:
+            device_configs[address] = DeviceConfig(address=address, name=name)
 
-        if is_simple_config_file:
-            return device_configs
+    return device_configs
 
-        # Try ro parse the config file as an `.ini`-like file.
-        device_configs.clear()
-        f.seek(0)
-        config = configparser.ConfigParser(interpolation=None)
-        config.read_file(f, source=path)
-        for section_name in config:
-            if not bluetooth_address_re.fullmatch(section_name):
-                continue
-            address = section_name
-            name = config[section_name].get("name")
-            device_configs.append(DeviceConfig(address=address, name=name))
 
-        return device_configs
+def centigrade_to_fahrenheit(degrees_c):
+    return degrees_c * 9 / 5 + 32
 
 
 def main(argv: typing.List[str]) -> int:
@@ -97,38 +134,41 @@ def main(argv: typing.List[str]) -> int:
                     help="TODO")
     ap.add_argument("--header", action=argparse.BooleanOptionalAction,
                     help="TODO")
+    ap.add_argument("--log-directory", help="TODO")
     ap.add_argument("--units", metavar="UNITS", type=str.lower,
                     choices=("c", "centigrade", "celsius", "f", "fahrenheit"),
                     default="centigrade",
                     help="The temperature units to show.")
     ap.add_argument("--utc", action="store_true",
                     help="Show time as UTC times instead of in the local time.")
-    ap.add_argument("name", nargs="?", help="TODO")
+    ap.add_argument("name", nargs="?", default="", help="TODO")
     args = ap.parse_args(argv[1:])
 
     config_file_path = (args.config_file_path
                         or os.path.expanduser("~/.config/gv-tools/gv-tools.rc"))
 
-    device_configs = parse_config_file(config_file_path)
+    config = Config(config_file_path)
 
-    # TODO: If no query, show interactive prompt.
+    # TODO: Include devices that have log files but aren't listed in the config.
     query = args.name
     q = query.lower()
     found: typing.List[DeviceConfig] = []
-    for config in device_configs:
-        if q in str(config).lower():
-            found.append(config)
+    for device in config.devices.values():
+        if q in str(device).lower():
+            found.append(device)
 
     if not found:
         print(f"\"{query}\" not found in {config_file_path}", file=sys.stderr)
         return 1
 
-    # TODO: Show interactive prompt if there is more than one result.
-    config = found[0]
-
-    if args.header is None or args.header:
-        print(config)
-        print("Date                        Temp.    RH  Battery")
+    response = python_cli_utils.numbered_choices_prompt(
+        found,
+        preamble="TODO",  # TODO
+        file=sys.stderr,
+    )
+    if response is None:
+        return 1
+    device_config = found[response]
 
     date = args.date
     if not date:
@@ -136,7 +176,17 @@ def main(argv: typing.List[str]) -> int:
         date = f"{now.year}-{now.month:02}"
 
     # TODO: List files and pick latest filename with matching address.
-    log_file_path = f"gvh507x_{config.short_address()}-{date}.txt"
+    log_directory = args.log_directory or config.log_directory
+    log_file_path = os.path.join(
+        log_directory,
+        f"gvh507x_{device_config.short_address()}-{date}.txt",
+    )
+    if not os.path.isfile(log_file_path):
+        print(f"No log file found for the specified device and date: "
+              f"{log_file_path}",
+              file=sys.stderr)
+        return 1
+
     log_line_re = re.compile(r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
                              r"\s+"
                              r"\d{2}:\d{2}:\d{2})"
@@ -148,7 +198,12 @@ def main(argv: typing.List[str]) -> int:
                              r"(?P<battery>\d+)"
                              r"\s*")
 
-    with open(log_file_path) as f:
+    with open(log_file_path) as f, \
+         python_cli_utils.paged_output() as out:
+        if args.header is None or args.header:
+            print(device_config, file=out)
+            print("Date                         Temp.     RH   Battery",
+                  file=out)
         for line in f:
             m = log_line_re.fullmatch(line)
             if not m:
@@ -166,10 +221,11 @@ def main(argv: typing.List[str]) -> int:
                 unit_symbol = "F"
             humidity = float(m.group("humidity"))
             battery = int(m.group("battery"))
-            print(f"{timestamp} "
-                  f"{degrees:6.2f}{unit_symbol} "
-                  f"{humidity:5.1f}% "
-                  f"[{battery:3d}%]")
+            print(f"{timestamp}  "
+                  f"{degrees:6.2f}{unit_symbol}  "
+                  f"{humidity:5.1f}%  "
+                  f"[{battery:3d}%]",
+                  file=out)
     return 0
 
 
