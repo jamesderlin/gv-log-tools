@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
-# TODO: Govee temperature logger log viewer
-#
-# * Parse gvh-titlemap.txt file
-# * Load specified (or latest) log from friendly name
-# * Tool to trim log files.
-# * Tool to email if outside temperature range.
+# TODO:
+# * Enforce Python version.(Needs 3.9(?) for argparse.BooleanOptionalAction)
+# * Documentation.
+# * Error messages.
+# * Refactor.
 
 """
 TODO: Documentation
@@ -121,6 +120,10 @@ def parse_map_file(
     return device_configs
 
 
+def chunk_address(address: str) -> str:
+    return ":".join((address[i : (i + 2)] for i in range(0, len(address), 2)))
+
+
 def centigrade_to_fahrenheit(degrees_c):
     return degrees_c * 9 / 5 + 32
 
@@ -144,13 +147,44 @@ def main(argv: typing.List[str]) -> int:
     ap.add_argument("name", nargs="?", default="", help="TODO")
     args = ap.parse_args(argv[1:])
 
+    query = args.name
+
     config_file_path = (args.config_file_path
                         or os.path.expanduser("~/.config/gv-tools/gv-tools.rc"))
 
     config = Config(config_file_path)
 
-    # TODO: Include devices that have log files but aren't listed in the config.
-    query = args.name
+    log_directory = args.log_directory or config.log_directory or "."
+    if not os.path.isdir(log_directory):
+        print(f"\"{log_directory}\" is not a directory.", file=sys.stderr)
+        return 1
+
+    if not query:
+        # If there's no explicit query, we'll list all known devices.  Retrieve
+        # all known Bluetooth addresses from the filenames of existing logs.
+        log_filename_re = re.compile(r"gv[A-Za-z0-9]+_"
+                                     r"(?P<address>[A-Fa-f0-9]{12})-"
+                                     r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
+                                     r"\.txt")
+
+        addresses: typing.Set[str] = set()
+        with os.scandir(log_directory) as dir_entries:
+            for entry in dir_entries:
+                if not entry.is_file():
+                    continue
+                match = log_filename_re.fullmatch(entry.name)
+                if not match:
+                    continue
+                addresses.add(match.group("address"))
+
+        # Merge found addresses into the ones specified by the configuration
+        # file.
+        for address in sorted(addresses):
+            chunked = chunk_address(address)
+            if chunked in config.devices:
+                continue
+            config.devices[chunked] = DeviceConfig(address=chunked)
+
     q = query.lower()
     found: typing.List[DeviceConfig] = []
     for device in config.devices.values():
@@ -176,7 +210,6 @@ def main(argv: typing.List[str]) -> int:
         date = f"{now.year}-{now.month:02}"
 
     # TODO: List files and pick latest filename with matching address.
-    log_directory = args.log_directory or config.log_directory
     log_file_path = os.path.join(
         log_directory,
         f"gvh507x_{device_config.short_address()}-{date}.txt",
