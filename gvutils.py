@@ -67,12 +67,6 @@ class DeviceConfig:
                 if self.name
                 else self.address)
 
-    def short_address(self) -> str:
-        """
-        Removes the `:` separators between octets in the Bluetooth address.
-        """
-        return self.address.replace(":", "")
-
 
 class Config:
     default_config_file_path = os.path.expanduser(

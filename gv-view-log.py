@@ -61,31 +61,33 @@ def main(argv: typing.List[str]) -> int:
     if not os.path.isdir(log_directory):
         raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
 
-    if not query:
-        # If there's no explicit query, we'll list all known devices.  Retrieve
-        # all known Bluetooth addresses from the filenames of existing logs.
-        log_filename_re = re.compile(r"gv[A-Za-z0-9]+_"
-                                     r"(?P<address>[A-Fa-f0-9]{12})-"
-                                     r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
-                                     r"\.txt")
+    # If there's no explicit query, we'll list all known devices.  Retrieve
+    # all known Bluetooth addresses from the filenames of existing logs.
+    log_filename_re = re.compile(f"(?P<base>"
+                                 r"gv[A-Za-z0-9]+_"
+                                 r"(?P<address>[A-Fa-f0-9]{12})-"
+                                 r")"
+                                 r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
+                                 r"\.txt")
 
-        addresses: typing.Set[str] = set()
-        with os.scandir(log_directory) as dir_entries:
-            for entry in dir_entries:
-                if not entry.is_file():
-                    continue
-                match = log_filename_re.fullmatch(entry.name)
-                if not match:
-                    continue
-                addresses.add(match.group("address"))
-
-        # Merge found addresses into the ones specified by the configuration
-        # file.
-        for address in sorted(addresses):
-            chunked = gvutils.chunk_address(address)
-            if chunked in config.devices:
+    addresses: typing.Dict[str, str] = {}
+    with os.scandir(log_directory) as dir_entries:
+        for entry in dir_entries:
+            if not entry.is_file():
                 continue
-            config.devices[chunked] = gvutils.DeviceConfig(address=chunked)
+            match = log_filename_re.fullmatch(entry.name)
+            if not match:
+                continue
+
+            address = gvutils.chunk_address(match.group("address"))
+            addresses[address] = match.group("base")
+
+    # Merge found addresses into the ones specified by the configuration
+    # file.
+    for address in sorted(addresses.keys()):
+        if address in config.devices:
+            continue
+        config.devices[address] = gvutils.DeviceConfig(address=address)
 
     q = query.lower()
     found: typing.List[gvutils.DeviceConfig] = []
@@ -112,11 +114,11 @@ def main(argv: typing.List[str]) -> int:
         now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
         date = f"{now.year}-{now.month:02}"
 
-    # TODO: List files and pick latest filename with matching address.
-    log_file_path = os.path.join(
-        log_directory,
-        f"gvh507x_{device_config.short_address()}-{date}.txt",
-    )
+    prefix = addresses.get(device_config.address)
+    if not prefix:
+        raise gvutils.AbortError(f"No log files found in {log_directory} for "
+                                 f"address {device_config.address}.")
+    log_file_path = os.path.join(log_directory, f"{prefix}{date}.txt")
     if not os.path.isfile(log_file_path):
         raise gvutils.AbortError(f"No log file found for the specified device "
                                  f"and date: {log_file_path}")
