@@ -20,6 +20,21 @@ map_file_re = re.compile("".join(
 )
 
 
+class AbortError(Exception):
+    """
+    A simple exception class to abort program execution.
+
+    If `cancelled` is True, no error message should be printed.
+    """
+    def __init__(self, message=None, *, cancelled=False, exit_code=1):
+        super().__init__(message or ("Cancelled."
+                                     if cancelled
+                                     else "Unknown error"))
+        assert exit_code != 0
+        self.cancelled = cancelled
+        self.exit_code = exit_code
+
+
 class DeviceConfig:
     def __init__(
         self,
@@ -43,6 +58,10 @@ class DeviceConfig:
 
 
 class Config:
+    default_config_file_path = os.path.expanduser(
+        "~/.config/gv-tools/gv-tools.rc",
+    )
+
     def __init__(self, path: typing.Optional[str]) -> None:
         """
         Initializes a `Config` object from a path to the specified
@@ -53,12 +72,16 @@ class Config:
 
         If no path is specified, uses the default configuration file path.
         """
-        self.config_file_path = \
-            path or os.path.expanduser("~/.config/gv-tools/gv-tools.rc")
         self.log_directory = ""
         self.devices: typing.OrderedDict[str, DeviceConfig] = {}
 
-        if not os.path.isfile(self.config_file_path):
+        if path:
+            if not os.path.isfile(path):
+                raise AbortError(f"File not found: {path}")
+            self.config_file_path = path
+        elif os.path.isfile(Config.default_config_file_path):
+            self.config_file_path = Config.default_config_file_path
+        else:
             return
 
         with open(self.config_file_path) as f:
@@ -73,7 +96,11 @@ class Config:
             self.devices.clear()
             f.seek(0)
             cp = configparser.ConfigParser(interpolation=None)
-            cp.read_file(f, source=self.config_file_path)
+            try:
+                cp.read_file(f, source=self.config_file_path)
+            except configparser.MissingSectionHeaderError:
+                raise AbortError(f"\"{self.config_file_path}\" is not a valid "
+                                 f"configuration file.")
 
         if cp.has_section("config"):
             main_section = cp["config"]

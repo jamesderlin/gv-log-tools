@@ -25,18 +25,27 @@ def main(argv: typing.List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.strip(), add_help=False)
     ap.add_argument("-h", "--help", action="help",
                     help="Show this help message and exit.")
-    ap.add_argument("--date", metavar="YEAR-MONTH", help="TODO")
+    ap.add_argument("--date", metavar="YEAR-MONTH",
+                    help="The year and month to print logs for.  If not "
+                         "specified, prints the log for the current month.")
     ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
-                    help="TODO")
+                    help=f"The path to the configuration file.  This may be "
+                         f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
+                         f"not specified, defaults to "
+                         f"`{gvutils.Config.default_config_file_path}`")
     ap.add_argument("--header", action=argparse.BooleanOptionalAction,
-                    help="TODO")
-    ap.add_argument("--log-directory", help="TODO")
+                    help="Whether to print the device name and column "
+                         "headings.")
+    ap.add_argument("--log-directory",
+                    help="Path to the directory containing "
+                         "GoveeBTTempLogger's log files.")
     ap.add_argument("--units", metavar="UNITS", type=str.lower,
                     choices=("c", "centigrade", "celsius", "f", "fahrenheit"),
                     default="centigrade",
                     help="The temperature units to show.")
     ap.add_argument("--utc", action="store_true",
-                    help="Show time as UTC times instead of in the local time.")
+                    help="Show times as UTC times instead of in the local "
+                         "time.")
     ap.add_argument("name", nargs="?", default="", help="TODO")
     args = ap.parse_args(argv[1:])
 
@@ -46,8 +55,7 @@ def main(argv: typing.List[str]) -> int:
 
     log_directory = args.log_directory or config.log_directory or "."
     if not os.path.isdir(log_directory):
-        print(f"\"{log_directory}\" is not a directory.", file=sys.stderr)
-        return 1
+        raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
 
     if not query:
         # If there's no explicit query, we'll list all known devices.  Retrieve
@@ -82,9 +90,8 @@ def main(argv: typing.List[str]) -> int:
             found.append(device)
 
     if not found:
-        print(f"\"{query}\" not found in {config.config_file_path}",
-              file=sys.stderr)
-        return 1
+        raise gvutils.AbortError(f"\"{query}\" not found in "
+                                 f"{config.config_file_path}")
 
     response = python_cli_utils.numbered_choices_prompt(
         found,
@@ -93,6 +100,7 @@ def main(argv: typing.List[str]) -> int:
     )
     if response is None:
         return 1
+
     device_config = found[response]
 
     date = args.date
@@ -106,10 +114,8 @@ def main(argv: typing.List[str]) -> int:
         f"gvh507x_{device_config.short_address()}-{date}.txt",
     )
     if not os.path.isfile(log_file_path):
-        print(f"No log file found for the specified device and date: "
-              f"{log_file_path}",
-              file=sys.stderr)
-        return 1
+        raise gvutils.AbortError(f"No log file found for the specified device "
+                                 f"and date: {log_file_path}")
 
     log_line_re = re.compile(r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
                              r"\s+"
@@ -157,6 +163,10 @@ if __name__ == "__main__":
     __name__ = os.path.basename(__file__)  # pylint: disable=redefined-builtin
     try:
         sys.exit(main(sys.argv))
+    except gvutils.AbortError as e:
+        if not e.cancelled:
+            print(f"{__name__}: {e}", file=sys.stderr)
+        sys.exit(e.exit_code)
     except KeyboardInterrupt:
         sys.exit(1)
     except BrokenPipeError:
