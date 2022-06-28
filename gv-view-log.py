@@ -71,16 +71,16 @@ def main(argv: typing.List[str]) -> int:
 
     # Merge found addresses into the ones specified by the configuration
     # file.
-    # TODO: Exclude addresses with no logs?
     for address in sorted(addresses.keys()):
         if address in config.devices:
             continue
         config.devices[address] = gvutils.DeviceConfig(address=address)
 
-    q = query.lower()
+    q = query.casefold()
     found: typing.List[gvutils.DeviceConfig] = []
     for device in config.devices.values():
-        if q in str(device).lower():
+        # Exclude addresses with no existing logs.
+        if device.address in addresses and q in str(device).casefold():
             found.append(device)
 
     if not found:
