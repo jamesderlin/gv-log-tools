@@ -66,6 +66,16 @@ class AbortError(Exception):
         self.exit_code = exit_code
 
 
+def parse_bool(s: str) -> bool:
+    """Parses a boolean value from a string."""
+    s = s.lower()
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    elif s in ("0", "false", "no", "n", "off"):
+        return False
+    raise AbortError(f"Invalid boolean value: {s}")
+
+
 class DeviceConfig:
     """Configuration for a Govee thermometer device."""
     def __init__(

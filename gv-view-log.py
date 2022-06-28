@@ -33,8 +33,9 @@ def main(argv: typing.List[str]) -> int:
                          f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
                          f"not specified, defaults to "
                          f"`{gvutils.Config.default_config_file_path}`.")
-    ap.add_argument("--header", metavar="VALUE", nargs="?", type=int,
-                    choices=(0, 1), default=1,
+    ap.add_argument("--header", metavar="VALUE",
+                    type=gvutils.parse_bool,
+                    default=True,
                     help="Set to `0` to suppress printing the device name and "
                          "column headings; set to `1` (the default) to print "
                          "them.")
@@ -125,7 +126,7 @@ def main(argv: typing.List[str]) -> int:
 
     with open(log_file_path) as f, \
          python_cli_utils.paged_output() as out:
-        if args.header is None or args.header:
+        if args.header:
             print(device_config, file=out)
             print("Date                         Temp.     RH   Battery",
                   file=out)
