@@ -19,6 +19,13 @@ map_file_re = re.compile("".join(
     ),
 )
 
+log_filename_re = re.compile(f"(?P<base>"
+                             r"gv[A-Za-z0-9]+_"
+                             r"(?P<address>[A-Fa-f0-9]{12})-"
+                             r")"
+                             r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
+                             r"\.txt")
+
 
 def has_python_version(
     script_file: str,
@@ -90,10 +97,10 @@ class Config:
             if not os.path.isfile(path):
                 raise AbortError(f"File not found: {path}")
             self.config_file_path = path
-        elif os.path.isfile(Config.default_config_file_path):
-            self.config_file_path = Config.default_config_file_path
         else:
-            return
+            self.config_file_path = Config.default_config_file_path
+            if not os.path.isfile(self.config_file_path):
+                return
 
         with open(self.config_file_path) as f:
             # Try to parse the config file first as GoveeBTTempLogger's
@@ -161,6 +168,27 @@ def parse_map_file(
             device_configs[address] = DeviceConfig(address=address, name=name)
 
     return device_configs
+
+
+def addresses_from_logs(log_directory: str) -> typing.Dict[str, str]:
+    """
+    Scans the specified directory for GoveeBTTempLogger log files and returns a
+    `dict` mapping Bluetooth addresses to filename prefixes (e.g.
+    '01:23:45:67:89:AB' => 'gvh507x_0123456789AB-').
+    """
+    addresses: typing.Dict[str, str] = {}
+    with os.scandir(log_directory) as dir_entries:
+        for entry in dir_entries:
+            if not entry.is_file():
+                continue
+            match = log_filename_re.fullmatch(entry.name)
+            if not match:
+                continue
+
+            address = chunk_address(match.group("address"))
+            addresses[address] = match.group("base")
+
+    return addresses
 
 
 def chunk_address(address: str) -> str:

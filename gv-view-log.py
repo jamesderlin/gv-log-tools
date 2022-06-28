@@ -3,7 +3,6 @@
 # TODO:
 # * Documentation.
 # * Error messages.
-# * Refactor.
 
 """
 TODO: Documentation
@@ -20,9 +19,9 @@ import typing
 import gvutils
 
 
-# 3.9.0 is required for `argparse.BooleanOptionalAction`.
-if not gvutils.has_python_version(__file__, (3, 9, 0)):
-    sys.exit(1)
+# Untested with earlier versions.
+if not gvutils.has_python_version(__file__, (3, 8, 0)):
+   sys.exit(1)
 
 
 def main(argv: typing.List[str]) -> int:
@@ -36,10 +35,12 @@ def main(argv: typing.List[str]) -> int:
                     help=f"The path to the configuration file.  This may be "
                          f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
                          f"not specified, defaults to "
-                         f"`{gvutils.Config.default_config_file_path}`")
-    ap.add_argument("--header", action=argparse.BooleanOptionalAction,
-                    help="Whether to print the device name and column "
-                         "headings.")
+                         f"`{gvutils.Config.default_config_file_path}`.")
+    ap.add_argument("--header", metavar="VALUE", nargs="?", type=int,
+                    choices=(0, 1), default=1,
+                    help="Set to `0` to suppress printing the device name and "
+                         "column headings; set to `1` (the default) to print "
+                         "them.")
     ap.add_argument("--log-directory",
                     help="Path to the directory containing "
                          "GoveeBTTempLogger's log files.")
@@ -57,33 +58,19 @@ def main(argv: typing.List[str]) -> int:
 
     config = gvutils.Config(args.config_file_path)
 
-    log_directory = args.log_directory or config.log_directory or "."
+    log_directory = args.log_directory or config.log_directory or os.getcwd()
     if not os.path.isdir(log_directory):
         raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
 
     # If there's no explicit query, we'll list all known devices.  Retrieve
     # all known Bluetooth addresses from the filenames of existing logs.
-    log_filename_re = re.compile(f"(?P<base>"
-                                 r"gv[A-Za-z0-9]+_"
-                                 r"(?P<address>[A-Fa-f0-9]{12})-"
-                                 r")"
-                                 r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
-                                 r"\.txt")
-
-    addresses: typing.Dict[str, str] = {}
-    with os.scandir(log_directory) as dir_entries:
-        for entry in dir_entries:
-            if not entry.is_file():
-                continue
-            match = log_filename_re.fullmatch(entry.name)
-            if not match:
-                continue
-
-            address = gvutils.chunk_address(match.group("address"))
-            addresses[address] = match.group("base")
+    addresses = gvutils.addresses_from_logs(log_directory)
+    if not addresses:
+        raise gvutils.AbortError(f"No log files found in {log_directory}")
 
     # Merge found addresses into the ones specified by the configuration
     # file.
+    # TODO: Exclude addresses with no logs?
     for address in sorted(addresses.keys()):
         if address in config.devices:
             continue
@@ -96,6 +83,7 @@ def main(argv: typing.List[str]) -> int:
             found.append(device)
 
     if not found:
+        assert query
         raise gvutils.AbortError(f"\"{query}\" not found in "
                                  f"{config.config_file_path}")
 
