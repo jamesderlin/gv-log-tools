@@ -1,5 +1,6 @@
 """
-TODO: Documentation
+Common utility classes and functions shared among govee_thermometer_utils
+scripts.
 """
 
 import collections
@@ -66,7 +67,7 @@ class AbortError(Exception):
 
 
 class DeviceConfig:
-    """TODO"""
+    """Configuration for a Govee thermometer device."""
     def __init__(
         self,
         *,
@@ -83,7 +84,7 @@ class DeviceConfig:
 
 
 class Config:
-    """TODO"""
+    """Settings read from the configuration file."""
     default_config_file_path = os.path.expanduser(
         "~/.config/gv-tools/gv-tools.rc",
     )

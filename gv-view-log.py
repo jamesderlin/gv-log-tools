@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
-# TODO:
-# * Documentation.
-# * Error messages.
-
 """
-TODO: Documentation
+A tool to more easily view logs from GoveeBTTempLogger and in a friendlier
+format.
 """
 
 import argparse
@@ -51,7 +48,11 @@ def main(argv: typing.List[str]) -> int:
     ap.add_argument("--utc", action="store_true",
                     help="Show times as UTC times instead of in the local "
                          "time.")
-    ap.add_argument("name", nargs="?", default="", help="TODO")
+    ap.add_argument("name", metavar="NAME", nargs="?", default="",
+                    help="The name (or partial name) of the device to print "
+                         "logs for.  If multiple devices are found or if no "
+                         "name is specified, prompts will be shown to allow "
+                         "selecting a specific device.")
     args = ap.parse_args(argv[1:])
 
     query = args.name
@@ -89,7 +90,7 @@ def main(argv: typing.List[str]) -> int:
 
     response = python_cli_utils.numbered_choices_prompt(
         [str(device) for device in found],
-        preamble="TODO",  # TODO
+        preamble="Govee thermometers found:",
         file=sys.stderr,
     )
     if response is None:
