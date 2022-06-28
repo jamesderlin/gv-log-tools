@@ -11,17 +11,17 @@ TODO: Documentation
 import argparse
 import datetime
 import os
-import python_cli_utils
 import re
 import sys
 import typing
 
 import gvutils
+import python_cli_utils
 
 
 # Untested with earlier versions.
 if not gvutils.has_python_version(__file__, (3, 8, 0)):
-   sys.exit(1)
+    sys.exit(1)
 
 
 def main(argv: typing.List[str]) -> int:
@@ -88,7 +88,7 @@ def main(argv: typing.List[str]) -> int:
                                  f"{config.config_file_path}")
 
     response = python_cli_utils.numbered_choices_prompt(
-        found,
+        [str(device) for device in found],
         preamble="TODO",  # TODO
         file=sys.stderr,
     )

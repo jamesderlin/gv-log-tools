@@ -2,6 +2,7 @@
 TODO: Documentation
 """
 
+import collections
 import configparser
 import os
 import re
@@ -16,10 +17,9 @@ map_file_re = re.compile("".join(
      bluetooth_address_re.pattern,
      r")",
      r"(?:\s+(?P<name>.*))?\s*"),
-    ),
-)
+))
 
-log_filename_re = re.compile(f"(?P<base>"
+log_filename_re = re.compile(r"(?P<base>"
                              r"gv[A-Za-z0-9]+_"
                              r"(?P<address>[A-Fa-f0-9]{12})-"
                              r")"
@@ -50,7 +50,13 @@ class AbortError(Exception):
 
     If `cancelled` is True, no error message should be printed.
     """
-    def __init__(self, message=None, *, cancelled=False, exit_code=1):
+    def __init__(
+        self,
+        message: typing.Optional[str] = None,
+        *,
+        cancelled: bool = False,
+        exit_code: int = 1,
+    ) -> None:
         super().__init__(message or ("Cancelled."
                                      if cancelled
                                      else "Unknown error"))
@@ -60,6 +66,7 @@ class AbortError(Exception):
 
 
 class DeviceConfig:
+    """TODO"""
     def __init__(
         self,
         *,
@@ -76,6 +83,7 @@ class DeviceConfig:
 
 
 class Config:
+    """TODO"""
     default_config_file_path = os.path.expanduser(
         "~/.config/gv-tools/gv-tools.rc",
     )
@@ -91,7 +99,8 @@ class Config:
         If no path is specified, uses the default configuration file path.
         """
         self.log_directory = ""
-        self.devices: typing.OrderedDict[str, DeviceConfig] = {}
+        self.devices: typing.OrderedDict[str, DeviceConfig] = \
+            collections.OrderedDict()
 
         if path:
             if not os.path.isfile(path):
@@ -116,9 +125,9 @@ class Config:
             cp = configparser.ConfigParser(interpolation=None)
             try:
                 cp.read_file(f, source=self.config_file_path)
-            except configparser.MissingSectionHeaderError:
+            except configparser.MissingSectionHeaderError as e:
                 raise AbortError(f"\"{self.config_file_path}\" is not a valid "
-                                 f"configuration file.")
+                                 f"configuration file.") from e
 
         if cp.has_section("config"):
             main_section = cp["config"]
@@ -127,7 +136,8 @@ class Config:
             map_file = main_section.get("map_file", "")
             if map_file:
                 with open(map_file) as f:
-                    self.devices = parse_map_file(f)
+                    self.devices = (parse_map_file(f)
+                                    or collections.OrderedDict())
 
         for section_name in cp:
             if not bluetooth_address_re.fullmatch(section_name):
@@ -153,7 +163,8 @@ def parse_map_file(
 
     Returns `None` on parsing failure.
     """
-    device_configs: typing.OrderedDict[str, DeviceConfig] = {}
+    device_configs: typing.OrderedDict[str, DeviceConfig] = \
+        collections.OrderedDict()
 
     for line in file:
         if whitespace_re.fullmatch(line):
@@ -193,10 +204,10 @@ def addresses_from_logs(log_directory: str) -> typing.Dict[str, str]:
 
 def chunk_address(address: str) -> str:
     """Inserts `:` separators between each octet of a Bluetooth address."""
-    assert(len(address) == 12)
+    assert len(address) == 12
     return ":".join((address[i : (i + 2)] for i in range(0, len(address), 2)))
 
 
-def fahrenheit_from_centigrade(degrees_c):
+def fahrenheit_from_centigrade(degrees_c: float) -> float:
     """Converts a temperature from degrees centigrade to degrees Fahrenheit."""
     return degrees_c * 9 / 5 + 32
