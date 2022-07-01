@@ -4,6 +4,8 @@
 A tool to more easily view logs from GoveeBTTempLogger and in a friendlier
 format.
 """
+# TODO:
+# * Allow customization of columns?
 
 import argparse
 import datetime
@@ -27,7 +29,8 @@ def main(argv: typing.List[str]) -> int:
                     help="Show this help message and exit.")
     ap.add_argument("--date", metavar="YEAR-MONTH",
                     help="The year and month to print logs for.  If not "
-                         "specified, prints the log for the current month.")
+                         "specified, prints the log for the current month.  "
+                         "Note that dates are always UTC.")
     ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
                     help=f"The path to the configuration file.  This may be "
                          f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
@@ -77,6 +80,7 @@ def main(argv: typing.List[str]) -> int:
             continue
         config.devices[address] = gvutils.DeviceConfig(address=address)
 
+    # TODO: List devices only with logs with the specified date.
     q = query.casefold()
     found: typing.List[gvutils.DeviceConfig] = []
     for device in config.devices.values():
@@ -113,45 +117,78 @@ def main(argv: typing.List[str]) -> int:
         raise gvutils.AbortError(f"No log file found for the specified device "
                                  f"and date: {log_file_path}")
 
-    log_line_re = re.compile(r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
+    log_line_re = re.compile(r"^"
+                             r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
                              r"\s+"
-                             r"\d{2}:\d{2}:\d{2})"
+                             r"\d{2}:\d{2}:\d{2}"
+                             r")"
                              r"\s+"
-                             r"(?P<centigrade>[-]?\d+[.]?\d*)"
+                             r"(?P<centigrade>[^\s]+)"
                              r"\s+"
                              r"(?P<humidity>\d+[.]?\d*)"
                              r"\s+"
                              r"(?P<battery>\d+)"
-                             r"\s*")
+                             r"(?:"
+                             r"\s+"
+                             r"(?P<model>[^\s]+)"
+                             r"\s+"
+                             r"(?P<centigrade2>[^\s]+)"
+                             r"\s+"
+                             r"(?P<centigrade3>[^\s]+)"
+                             r"\s+"
+                             r"(?P<centigrade4>[^\s]+)"
+                             r")?")
 
     with open(log_file_path) as f, \
          python_cli_utils.paged_output() as out:
-        if args.header:
-            print(device_config, file=out)
-            print("Date                         Temp.     RH   Battery",
-                  file=out)
+        first = True
         for line in f:
-            m = log_line_re.fullmatch(line)
+            m = log_line_re.match(line)
             if not m:
                 continue
             timestamp = (datetime.datetime.fromisoformat(m.group("timestamp"))
                          .replace(tzinfo=datetime.timezone.utc))
             if not args.utc:
                 timestamp = timestamp.astimezone()
-            centigrade = float(m.group("centigrade"))
+            centigrades = [
+                float(m.group("centigrade")),
+                *(float(s) for s in (m.group(f"centigrade{i}")
+                                     for i in range(2, 5))
+                  if s)
+            ]
+
             if args.units in ("c", "celsius", "centigrade"):
-                degrees = centigrade
+                degrees = centigrades
                 unit_symbol = "C"
             else:
-                degrees = gvutils.fahrenheit_from_centigrade(centigrade)
+                degrees = [gvutils.fahrenheit_from_centigrade(centigrade)
+                           for centigrade in centigrades]
                 unit_symbol = "F"
+
             humidity = float(m.group("humidity"))
             battery = int(m.group("battery"))
-            print(f"{timestamp}  "
-                  f"{degrees:6.2f}{unit_symbol}  "
-                  f"{humidity:5.1f}%  "
-                  f"[{battery:3d}%]",
-                  file=out)
+
+            if first and args.header:
+                print(device_config, file=out)
+
+                header = "  ".join([
+                    "Date                     ",
+                    *("  Temp." for i in degrees),
+                    "   RH ",
+                    "Battery",
+                ])
+                print(header, file=out)
+            first = False
+
+            print(
+                "  ".join([
+                    f"{timestamp}",
+                    *(f"{d:6.2f}{unit_symbol}" for d in degrees),
+                    f"{humidity:5.1f}%",
+                    f"[{battery:3d}%]",
+                ]),
+                file=out,
+            )
     return 0
 
 

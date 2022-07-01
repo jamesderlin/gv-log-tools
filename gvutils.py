@@ -37,7 +37,7 @@ def has_python_version(
     specified version, `False` otherwise.
     """
     if sys.version_info < version_tuple:
-        print("{name}: Requires Python {version} or newer."
+        print("{name}: Requires Python {version} or greater."
               .format(name=script_file,
                       version=".".join((str(i) for i in version_tuple))),
               file=sys.stderr)
