@@ -192,13 +192,19 @@ def parse_map_file(
     return device_configs
 
 
-def addresses_from_logs(log_directory: str) -> typing.Dict[str, str]:
+def generate_log_lookup_table(
+    log_directory: str,
+) -> typing.Dict[typing.Tuple[int, int], typing.Dict[str, str]]:
     """
     Scans the specified directory for GoveeBTTempLogger log files and returns a
-    `dict` mapping Bluetooth addresses to filename prefixes (e.g.
-    '01:23:45:67:89:AB' => 'gvh507x_0123456789AB-').
+    lookup table that stores their filenames.  The table uses `tuple`s of
+    `(year, month)` as the primary keys and Bluetooth addresses as the
+    secondary keys.  For example:
+    ```
+    (2022, 7): {'01:23:45:67:89:AB': 'gvh507x_0123456789AB-2022-07.txt'}
+    ```
     """
-    addresses: typing.Dict[str, str] = {}
+    log_table: typing.Dict[typing.Tuple[int, int], typing.Dict[str, str]] = {}
     with os.scandir(log_directory) as dir_entries:
         for entry in dir_entries:
             if not entry.is_file():
@@ -208,9 +214,12 @@ def addresses_from_logs(log_directory: str) -> typing.Dict[str, str]:
                 continue
 
             address = chunk_address(match.group("address"))
-            addresses[address] = match.group("base")
+            year = int(match.group("year"))
+            month = int(match.group("month"))
 
-    return addresses
+            log_table.setdefault((year, month), {})[address] = entry.name
+
+    return log_table
 
 
 def chunk_address(address: str) -> str:

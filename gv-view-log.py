@@ -67,11 +67,29 @@ def main(argv: typing.List[str]) -> int:
     if not os.path.isdir(log_directory):
         raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
 
+    if args.date:
+        date_re = re.compile(r"(?P<year>\d+)-(?P<month>\d+)")
+        match = date_re.fullmatch(args.date)
+        if not match:
+            raise gvutils.AbortError(f"Invalid date.  Date must be in the "
+                                     f"form YYYY-MM: {args.date}")
+        year = int(match.group("year"))
+        month = int(match.group("month"))
+    else:
+        now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+        year = now.year
+        month = now.month
+
     # If there's no explicit query, we'll list all known devices.  Retrieve
     # all known Bluetooth addresses from the filenames of existing logs.
-    addresses = gvutils.addresses_from_logs(log_directory)
-    if not addresses:
+    log_table = gvutils.generate_log_lookup_table(log_directory)
+    if not log_table:
         raise gvutils.AbortError(f"No log files found in {log_directory}")
+
+    addresses = log_table.get((year, month))
+    if not addresses:
+        raise gvutils.AbortError(f"No log files found in {log_directory} for "
+                                 f"{year}-{month:02}.")
 
     # Merge found addresses into the ones specified by the configuration
     # file.
@@ -80,7 +98,6 @@ def main(argv: typing.List[str]) -> int:
             continue
         config.devices[address] = gvutils.DeviceConfig(address=address)
 
-    # TODO: List devices only with logs with the specified date.
     q = query.casefold()
     found: typing.List[gvutils.DeviceConfig] = []
     for device in config.devices.values():
@@ -90,12 +107,11 @@ def main(argv: typing.List[str]) -> int:
 
     if not found:
         assert query
-        raise gvutils.AbortError(f"\"{query}\" not found in "
-                                 f"{config.config_file_path}")
+        raise gvutils.AbortError(f"No matches to \"{query}\" found.")
 
     response = python_cli_utils.numbered_choices_prompt(
         [str(device) for device in found],
-        preamble="Govee thermometers found:",
+        preamble=f"Govee thermometers found for {year}-{month:02}:",
         file=sys.stderr,
     )
     if response is None:
@@ -103,16 +119,8 @@ def main(argv: typing.List[str]) -> int:
 
     device_config = found[response]
 
-    date = args.date
-    if not date:
-        now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
-        date = f"{now.year}-{now.month:02}"
-
-    prefix = addresses.get(device_config.address)
-    if not prefix:
-        raise gvutils.AbortError(f"No log files found in {log_directory} for "
-                                 f"address {device_config.address}.")
-    log_file_path = os.path.join(log_directory, f"{prefix}{date}.txt")
+    log_file_path = os.path.join(log_directory,
+                                 addresses[device_config.address])
     if not os.path.isfile(log_file_path):
         raise gvutils.AbortError(f"No log file found for the specified device "
                                  f"and date: {log_file_path}")
@@ -143,16 +151,17 @@ def main(argv: typing.List[str]) -> int:
          python_cli_utils.paged_output() as out:
         first = True
         for line in f:
-            m = log_line_re.match(line)
-            if not m:
+            match = log_line_re.match(line)
+            if not match:
                 continue
-            timestamp = (datetime.datetime.fromisoformat(m.group("timestamp"))
-                         .replace(tzinfo=datetime.timezone.utc))
+            timestamp = \
+                (datetime.datetime.fromisoformat(match.group("timestamp"))
+                 .replace(tzinfo=datetime.timezone.utc))
             if not args.utc:
                 timestamp = timestamp.astimezone()
             centigrades = [
-                float(m.group("centigrade")),
-                *(float(s) for s in (m.group(f"centigrade{i}")
+                float(match.group("centigrade")),
+                *(float(s) for s in (match.group(f"centigrade{i}")
                                      for i in range(2, 5))
                   if s)
             ]
@@ -165,8 +174,8 @@ def main(argv: typing.List[str]) -> int:
                            for centigrade in centigrades]
                 unit_symbol = "F"
 
-            humidity = float(m.group("humidity"))
-            battery = int(m.group("battery"))
+            humidity = float(match.group("humidity"))
+            battery = int(match.group("battery"))
 
             if first and args.header:
                 print(device_config, file=out)
