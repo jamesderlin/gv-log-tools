@@ -1,4 +1,4 @@
-# gv-tools
+# gv-log-tools
 
 Utility scripts for processing log files from [GoveeBTTempLogger] for Govee
 Bluetooth thermometers.
@@ -15,14 +15,14 @@ Prerequisites:
 * [GoveeBTTempLogger].
 * Python 3.8 or greater.
 
-`gv-tools` depends on Git submodules, so `--recurse-submodules` is necessary
-when using `git clone`:
+`gv-log-tools` depends on Git submodules, so `--recurse-submodules` is
+necessary when using `git clone`:
 
 ```shell
-git clone --recurse-submodules https://github.com/jamesderlin/gv-tools.git
+git clone --recurse-submodules https://github.com/jamesderlin/gv-log-tools.git
 ```
 
-Optionally add a `~/.config/gv-tools/gv-tools.rc` file:
+Optionally add a `~/.config/gv-log-tools/gv-log-tools.rc` file:
 
 ```ini
 [config]

@@ -113,7 +113,7 @@ class DeviceConfig:
 class Config:
     """Settings read from the configuration file."""
     default_config_file_path = os.path.expanduser(
-        "~/.config/gv-tools/gv-tools.rc",
+        "~/.config/gv-log-tools/gv-log-tools.rc",
     )
 
     def __init__(self, path: typing.Optional[str]) -> None:
@@ -122,7 +122,7 @@ class Config:
         configuration file.
 
         The specified file may either be a GoveeBTTempLogger `gvh-titlemap.txt`
-        file or a `gv-tools.rc` `.ini`-like file.
+        file or a `gv-log-tools.rc` `.ini`-like file.
 
         If no path is specified, uses the default configuration file path.
         """
