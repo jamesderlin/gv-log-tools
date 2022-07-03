@@ -161,9 +161,14 @@ class Config:
             main_section = cp["config"]
             self.log_directory = main_section.get("log_directory", "")
 
-            map_file = main_section.get("map_file", "")
+            map_file = main_section.get("map_file")
             if map_file:
-                with open(map_file) as f:
+                try:
+                    f = open(map_file)
+                except OSError as e:
+                    raise AbortError(f"Failed to parse {map_file}: "
+                                     f"{e.strerror}") from e
+                with f:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
 
