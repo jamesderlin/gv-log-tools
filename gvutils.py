@@ -22,6 +22,7 @@ scripts.
 
 import collections
 import configparser
+import functools
 import os
 import re
 import sys
@@ -29,7 +30,11 @@ import typing
 
 
 bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
+
 whitespace_re = re.compile(r"\s+")
+
+temperature_re = re.compile(r"(?P<degrees>[^\s]+)\s*(?P<units>[CF])")
+
 map_file_re = re.compile("".join(
     (r"(?P<address>",
      bluetooth_address_re.pattern,
@@ -75,9 +80,8 @@ class AbortError(Exception):
         cancelled: bool = False,
         exit_code: int = 1,
     ) -> None:
-        super().__init__(message or ("Cancelled."
-                                     if cancelled
-                                     else "Unknown error"))
+        super().__init__(message
+                         or ("Cancelled." if cancelled else "Unknown error"))
         assert exit_code != 0
         self.cancelled = cancelled
         self.exit_code = exit_code
@@ -103,6 +107,8 @@ class DeviceConfig:
     ) -> None:
         self.address = address.upper()
         self.name = name
+        self.min_temperature = None
+        self.max_temperature = None
 
     def __str__(self) -> str:
         return (f"{self.name} ({self.address})"
@@ -175,6 +181,20 @@ class Config:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
 
+        def parse_entry(
+            section: str,
+            key: str,
+            parse_value: typing.Callable[[str], typing.Any],
+        ) -> typing.Any:
+            try:
+                value = cp[section].get(key)
+                if value is None:
+                    return None
+                return parse_value(value)
+            except ValueError as e:
+                raise AbortError(f"{e} (for `{key}` in section [{section}] in "
+                                 f"{self.config_file_path})") from e
+
         for section_name in cp:
             if not bluetooth_address_re.fullmatch(section_name):
                 continue
@@ -182,8 +202,16 @@ class Config:
             name = cp[section_name].get("name")
 
             # Device names from the map file take precedence.
-            self.devices.setdefault(address, DeviceConfig(address=address,
+            device = self.devices.setdefault(address,
+                                             DeviceConfig(address=address,
                                                           name=name))
+
+            device.min_temperature = parse_entry(section_name,
+                                                 "min_temperature",
+                                                 Temperature.parse)
+            device.max_temperature = parse_entry(section_name,
+                                                 "max_temperature",
+                                                 Temperature.parse)
 
 
 def parse_map_file(
@@ -256,3 +284,54 @@ def chunk_address(address: str) -> str:
 def fahrenheit_from_centigrade(degrees_c: float) -> float:
     """Converts a temperature from degrees centigrade to degrees Fahrenheit."""
     return degrees_c * 9 / 5 + 32
+
+
+def centigrade_from_fahrenheit(degrees_f: float) -> float:
+    """Converts a temperature from degrees Fahrenheit to degrees centigrade."""
+    return (degrees_f - 32) * 5 / 9
+
+
+@functools.total_ordering
+class Temperature:
+    """A class to represent temperatures."""
+    def __init__(self, *, degrees_c: float) -> None:
+        self.degrees_c = degrees_c
+
+    @classmethod
+    def parse(cls, s: str) -> "Temperature":
+        """
+        Returns a `Temperature` object parsed from a string.
+
+        Raises `ValueError` if the string is not a valid temperature.
+
+        Examples of accepted inputs:
+        ```python
+        Temperature.parse("0C")
+        Temperature.parse("100.0c")
+        Temperature.parse("-18.0F")
+        Temperature.parse("98.6f")
+        Temperature.parse("451 F")
+        ```
+        Accepted units are `"C"` and `"F"`.  Case is ignored.
+        """
+        match = temperature_re.fullmatch(s.strip().upper())
+        if not match:
+            raise ValueError(f"Invalid temperature: {s}")
+        try:
+            degrees = float(match.group("degrees"))
+        except ValueError as e:
+            raise ValueError(f"Invalid temperature: {s}") from e
+        units = match.group("units")
+        if units == "F":
+            degrees = centigrade_from_fahrenheit(degrees)
+        return Temperature(degrees_c=degrees)
+
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, Temperature)
+                and self.degrees_c == other.degrees_c)
+
+    def __lt__(self, other: "Temperature") -> bool:
+        return self.degrees_c < other.degrees_c
+
+    def __repr__(self) -> str:
+        return f"{self.degrees_c:.2f}C"
