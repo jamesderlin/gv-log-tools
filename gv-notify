@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+
+# gv-notify
+#
+# Copyright (C) 2022 James D. Lin
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+TODO
+"""
+
+import argparse
+import datetime
+import os
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import typing
+
+import gvutils
+
+# Untested with earlier versions.
+if not gvutils.has_python_version(__file__, (3, 8, 0)):
+    sys.exit(1)
+
+
+def is_executable_file(path: str) -> bool:
+    """
+    Returns `True` if the file specified by `path` is an executable file,
+    `False` otherwise.
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return False
+    else:
+        mask = stat.S_IFREG | stat.S_IXUSR
+        return (info.st_mode & mask) == mask
+
+
+def get_out_of_range_values(
+    log_path: str,
+    *,
+    after: datetime.datetime,
+    min: gvutils.Temperature,  # pylint: disable=redefined-builtin
+    max: gvutils.Temperature,  # pylint: disable=redefined-builtin
+) -> typing.Generator[typing.Tuple[datetime.datetime, gvutils.Temperature],
+                      None,
+                      None]:
+    """TODO: Document"""
+    with open(log_path) as f:
+        for line in f:
+            match = gvutils.log_line_re.match(line)
+            if not match:
+                continue
+
+            timestamp = \
+                (datetime.datetime.fromisoformat(match.group("timestamp"))
+                 .replace(tzinfo=datetime.timezone.utc))
+            if timestamp < after:
+                continue
+
+            centigrades = (
+                float(match.group("centigrade")),
+                *(float(s)
+                  for s in (match.group(f"centigrade{i}")
+                            for i in range(2, 5))
+                  if s),
+            )
+            temperatures = (gvutils.Temperature(degrees_c=c)
+                            for c in centigrades)
+            for t in temperatures:
+                if ((min is not None and t < min)
+                        or (max is not None and t > max)):
+                    yield (timestamp, t)
+
+
+def main(argv: typing.List[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.strip(), add_help=False)
+    ap.add_argument("-h", "--help", action="help",
+                    help="Show this help message and exit.")
+    ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
+                    help=f"The path to the configuration file.  This may be "
+                         f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
+                         f"not specified, defaults to "
+                         f"`{gvutils.Config.default_config_file_path}`.")
+    ap.add_argument("--dry-run", action="store_true", help="TODO")
+    ap.add_argument("--log-directory",
+                    help="Path to the directory containing "
+                         "GoveeBTTempLogger's log files.")
+    ap.add_argument("--utc", action="store_true",
+                    help="Show times as UTC times instead of in the local "
+                         "time.")
+    args = ap.parse_args(argv[1:])
+
+    config = gvutils.Config(args.config_file_path)
+
+    log_directory = args.log_directory or config.log_directory or os.getcwd()
+    if not os.path.isdir(log_directory):
+        raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
+
+    # For each device in the config file, find the latest log file, read the
+    # last temperature reading, compare against constraints in the config file.
+    #
+    # Might need to compare against multiple log files to handle month
+    # transitions.
+    #
+    # Need to define exactly what we're scanning for.
+    # A. Entries within a specified timespan from current?
+    # B. Entries within a specified timespan from latest entry?
+
+    if not config.notify_command:
+        raise gvutils.AbortError(f"{__name__} requires `notify_command` to "
+                                 f"be set in the `[config]` section of "
+                                 f"{config.config_file_path}.  Run "
+                                 f"`{__name__} --help` for details.")
+
+    command = [os.path.expanduser(token)
+               for token in shlex.split(config.notify_command)]
+
+    if not os.path.isabs(command[0]):
+        command[0] = (os.path.abspath(command[0])
+                      if is_executable_file(command[0])
+                      else (shutil.which(command[0]) or command[0]))
+    elif not is_executable_file(command[0]):
+        raise gvutils.AbortError(f"\"{command[0]}\" is not an executable "
+                                 f"file.")
+
+    log_table = gvutils.generate_log_lookup_table(log_directory)
+    if not log_table:
+        raise gvutils.AbortError(f"No log files found in {log_directory}")
+
+    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    delta = datetime.timedelta(minutes=15)
+    start = now - delta
+
+    recent_logs = {address: [log_file]
+                   for (address, log_file)
+                   in log_table.get((start.year, start.month), {}).items()}
+    if start.month != now.month:
+        for (address, log_file) in log_table.get((now.year, now.month),
+                                                 {}).items():
+            recent_logs.setdefault(address, []).append(log_file)
+
+    flagged: typing.Dict[str, typing.List[typing.Tuple[datetime.datetime,
+                                                       gvutils.Temperature]]] \
+        = {}
+    for (address, log_list) in recent_logs.items():
+        device = config.devices[address]
+        if device.max_temperature is None and device.min_temperature is None:
+            continue
+
+        for log_file in log_list:
+            values = list(get_out_of_range_values(os.path.join(log_directory,
+                                                               log_file),
+                                                  after=start,
+                                                  min=device.min_temperature,
+                                                  max=device.max_temperature))
+            if values:
+                flagged[device.address] = values
+
+    message_lines: typing.List[str] = []
+    for (address, data) in flagged.items():
+        device = config.devices[address]
+
+        # pylint: disable=redefined-builtin
+        min = device.min_temperature
+        max = device.max_temperature
+
+        if min is not None and max is not None:
+            reason = f"Values out of range [{min}, {max}]"
+        elif max is not None:
+            reason = f"Values above {max}"
+        elif min is not None:
+            reason = f"Values below {min}"
+        else:
+            assert False
+
+        message_lines.append(f"{device}: {reason}:")
+        for (timestamp, temperature) in data:
+            timestamp = timestamp.astimezone(datetime.timezone.utc
+                                             if args.utc else None)
+            message_lines.append(f"  {timestamp} {temperature}")
+
+    if not message_lines:
+        return 0
+
+    message = "\n".join(message_lines)
+    if args.dry_run:
+        print(message)
+        return 0
+
+    result = subprocess.run(command, input=message, text=True, check=False)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    __name__ = os.path.basename(__file__)  # pylint: disable=redefined-builtin
+    try:
+        sys.exit(main(sys.argv))
+    except gvutils.AbortError as e:
+        if not e.cancelled:
+            print(f"{__name__}: {e}", file=sys.stderr)
+        sys.exit(e.exit_code)
+    except KeyboardInterrupt:
+        sys.exit(1)
+    except BrokenPipeError:
+        # From <https://docs.python.org/3/library/signal.html#note-on-sigpipe>:
+        #
+        # Python flushes standard streams on exit; redirect remaining output
+        # to devnull to avoid another BrokenPipeError at shutdown.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)  # Python exits with error code 1 on EPIPE.

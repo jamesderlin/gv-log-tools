@@ -49,6 +49,28 @@ log_filename_re = re.compile(r"(?P<base>"
                              r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})"
                              r"\.txt")
 
+log_line_re = re.compile(r"^"
+                         r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
+                         r"\s+"
+                         r"\d{2}:\d{2}:\d{2}"
+                         r")"
+                         r"\s+"
+                         r"(?P<centigrade>[^\s]+)"
+                         r"\s+"
+                         r"(?P<humidity>\d+[.]?\d*)"
+                         r"\s+"
+                         r"(?P<battery>\d+)"
+                         r"(?:"
+                         r"\s+"
+                         r"(?P<model>[^\s]+)"
+                         r"\s+"
+                         r"(?P<centigrade2>[^\s]+)"
+                         r"\s+"
+                         r"(?P<centigrade3>[^\s]+)"
+                         r"\s+"
+                         r"(?P<centigrade4>[^\s]+)"
+                         r")?")
+
 
 def has_python_version(
     script_file: str,
@@ -180,6 +202,8 @@ class Config:
                 with f:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
+
+            self.notify_command = main_section.get("notify_command")
 
         def parse_entry(
             section: str,

@@ -143,33 +143,11 @@ def main(argv: typing.List[str]) -> int:
         raise gvutils.AbortError(f"No log file found for the specified device "
                                  f"and date: {log_file_path}")
 
-    log_line_re = re.compile(r"^"
-                             r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
-                             r"\s+"
-                             r"\d{2}:\d{2}:\d{2}"
-                             r")"
-                             r"\s+"
-                             r"(?P<centigrade>[^\s]+)"
-                             r"\s+"
-                             r"(?P<humidity>\d+[.]?\d*)"
-                             r"\s+"
-                             r"(?P<battery>\d+)"
-                             r"(?:"
-                             r"\s+"
-                             r"(?P<model>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade2>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade3>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade4>[^\s]+)"
-                             r")?")
-
     with open(log_file_path) as f, \
          python_cli_utils.paged_output() as out:
         first = True
         for line in f:
-            match = log_line_re.match(line)
+            match = gvutils.log_line_re.match(line)
             if not match:
                 continue
             timestamp = \
