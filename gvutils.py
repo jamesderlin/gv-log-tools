@@ -159,11 +159,14 @@ class Config:
 
         if cp.has_section("config"):
             main_section = cp["config"]
-            self.log_directory = main_section.get("log_directory", "")
+            self.log_directory = os.path.expanduser(
+                main_section.get("log_directory", "") or "",
+            )
 
-            map_file = main_section.get("map_file")
+            map_file = os.path.expanduser(main_section.get("map_file") or "")
             if map_file:
                 try:
+                    # pylint: disable=consider-using-with
                     f = open(map_file)
                 except OSError as e:
                     raise AbortError(f"Failed to parse {map_file}: "

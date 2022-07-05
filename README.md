@@ -46,7 +46,7 @@ name=Garage Chest Freezer
 
 ## Examples
 
-```shell
+```
 $ gv-view-log garage  # Show the current log for a device named with "garage".
 Garage Chest Freezer (A4:C1:38:67:89:AB)
 Date                         Temp.     RH   Battery
@@ -60,7 +60,7 @@ $ gv-view-log
 Govee thermometers found for 2022-06:
   1: Kitchen Refrigerator (A4:C1:38:01:23:45)
   2: Garage Chest Freezer (A4:C1:38:67:89:AB)
-[1..2]: 1
+[1, 2]: 1
 Kitchen Refrigerator (A4:C1:38:01:23:45)
 Date                         Temp.     RH   Battery
 2022-06-20 13:17:12-07:00    1.22C   24.1%  [ 70%]
