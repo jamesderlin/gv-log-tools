@@ -21,8 +21,6 @@
 Generates notifications if a Govee thermometer reports a temperature outside of
 an expected range.
 """
-# TODO:
-# * Report temperatures in the original units.
 
 import argparse
 import datetime
@@ -122,9 +120,13 @@ def get_out_of_range_values(
             temperatures = (gvutils.Temperature(degrees_c=c)
                             for c in centigrades)
             for t in temperatures:
-                if ((min is not None and t < min)
-                        or (max is not None and t > max)):
-                    yield (timestamp, t)
+                if min is not None and t < min:
+                    t.preferred_unit = min.preferred_unit
+                elif max is not None and t > max:
+                    t.preferred_unit = max.preferred_unit
+                else:
+                    continue
+                yield (timestamp, t)
 
 
 @gvutils.entrypoint

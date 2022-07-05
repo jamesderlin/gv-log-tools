@@ -22,6 +22,7 @@ scripts.
 
 import collections
 import configparser
+import enum
 import functools
 import os
 import re
@@ -344,11 +345,23 @@ def centigrade_from_fahrenheit(degrees_f: float) -> float:
     return (degrees_f - 32) * 5 / 9
 
 
+class TemperatureUnit(enum.Enum):
+    """The preferred unit for measuring temperature."""
+    CENTIGRADE = enum.auto()
+    FAHRENHEIT = enum.auto()
+
+
 @functools.total_ordering
 class Temperature:
     """A class to represent temperatures."""
-    def __init__(self, *, degrees_c: float) -> None:
+    def __init__(
+        self,
+        *,
+        degrees_c: float,
+        preferred_unit: TemperatureUnit = TemperatureUnit.CENTIGRADE,
+    ) -> None:
         self.degrees_c = degrees_c
+        self.preferred_unit = preferred_unit
 
     @classmethod
     def parse(cls, s: str) -> "Temperature":
@@ -375,9 +388,11 @@ class Temperature:
         except ValueError as e:
             raise ValueError(f"Invalid temperature: {s}") from e
         units = match.group("units")
+        preferred_unit = TemperatureUnit.CENTIGRADE
         if units == "F":
             degrees = centigrade_from_fahrenheit(degrees)
-        return Temperature(degrees_c=degrees)
+            preferred_unit = TemperatureUnit.FAHRENHEIT
+        return Temperature(degrees_c=degrees, preferred_unit=preferred_unit)
 
     def __eq__(self, other: object) -> bool:
         return (isinstance(other, Temperature)
@@ -386,5 +401,8 @@ class Temperature:
     def __lt__(self, other: "Temperature") -> bool:
         return self.degrees_c < other.degrees_c
 
-    def __repr__(self) -> str:
-        return f"{self.degrees_c:.2f}C"
+    def __str__(self) -> str:
+        if self.preferred_unit == TemperatureUnit.CENTIGRADE:
+            return f"{self.degrees_c:.2f}C"
+        else:
+            return f"{fahrenheit_from_centigrade(self.degrees_c):.2f}F"
