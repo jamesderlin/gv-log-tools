@@ -109,6 +109,35 @@ class AbortError(Exception):
         self.exit_code = exit_code
 
 
+def entrypoint(
+    main: typing.Callable[[typing.List[str]], int],
+) -> typing.Callable[[typing.List[str]], int]:
+    """
+    Returns a decorator for top-level `main` (or equivalent) functions.
+
+    Used to reduce boilerplate.
+    """
+    @functools.wraps(main)
+    def wrapper(argv: typing.List[str]) -> int:
+        try:
+            return main(argv)
+        except AbortError as e:
+            if not e.cancelled:
+                print(f"{__name__}: {e}", file=sys.stderr)
+            return e.exit_code
+        except KeyboardInterrupt:
+            return 1
+        except BrokenPipeError:
+            # From <https://docs.python.org/3/library/signal.html#note-on-sigpipe>:
+            #
+            # Python flushes standard streams on exit; redirect remaining output
+            # to devnull to avoid another BrokenPipeError at shutdown.
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            return 1  # Python exits with error code 1 on EPIPE.
+    return wrapper
+
+
 def parse_bool(s: str) -> bool:
     """Parses a boolean value from a string."""
     s = s.lower()
