@@ -65,7 +65,8 @@ def main(argv: typing.List[str]) -> int:
     ap.add_argument("--units", metavar="UNITS", type=str.lower,
                     choices=("c", "centigrade", "celsius", "f", "fahrenheit"),
                     default="centigrade",
-                    help="The temperature units to show.")
+                    help="The temperature units to show (e.g. `C`, `F`, "
+                         "`Fahrenheit`).")
     ap.add_argument("--utc", action="store_true",
                     help="Show times as UTC times instead of in the local "
                          "time.")
