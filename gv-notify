@@ -18,12 +18,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-TODO
+Generates notifications if a Govee thermometer reports a temperature outside of
+an expected range.
 """
+# TODO:
+# * Report temperatures in the original units.
 
 import argparse
 import datetime
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -52,16 +56,50 @@ def is_executable_file(path: str) -> bool:
         return (info.st_mode & mask) == mask
 
 
+def parse_duration(s: str) -> datetime.timedelta:
+    """
+    Parses a duration (a `datetime.timedelta`) from a string.
+
+    Examples:
+    ```python
+    parse_duration("1d23m45s")
+    parse_duration("120m")
+    parse_duration("1.5h")
+    parse_duration("0.125s")
+    ```
+    """
+    # For simplicity, this RE is not strict and permits some invalid values.
+    # Invalid values will be handled later.
+    duration_re = re.compile(r"(?:(?P<days>[0-9.]+)d)?"
+                             r"(?:(?P<hours>[0-9.]+)h)?"
+                             r"(?:(?P<minutes>[0-9.]+)m)?"
+                             r"(?:(?P<seconds>[0-9.]+)s)?")
+    match = duration_re.fullmatch(s)
+    if not match or not s:
+        raise ValueError(f"Failed to parse a duration from \"{s}\"")
+    try:
+        return datetime.timedelta(days=float(match.group("days") or 0),
+                                  hours=float(match.group("hours") or 0),
+                                  minutes=float(match.group("minutes") or 0),
+                                  seconds=float(match.group("seconds") or 0))
+    except ValueError as e:
+        raise ValueError(f"Failed to parse a duration from \"{s}\"") from e
+
+
 def get_out_of_range_values(
     log_path: str,
     *,
     after: datetime.datetime,
-    min: gvutils.Temperature,  # pylint: disable=redefined-builtin
-    max: gvutils.Temperature,  # pylint: disable=redefined-builtin
+    min: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
+    max: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
 ) -> typing.Generator[typing.Tuple[datetime.datetime, gvutils.Temperature],
                       None,
                       None]:
-    """TODO: Document"""
+    """
+    A generator that yields `(timestamp, temperature)` tuples for all logged
+    events in `log_path` after (and including) `after` and that report
+    temperatures outside of the range specified by `min` and `max`.
+    """
     with open(log_path) as f:
         for line in f:
             match = gvutils.log_line_re.match(line)
@@ -94,11 +132,17 @@ def main(argv: typing.List[str]) -> int:
     ap.add_argument("-h", "--help", action="help",
                     help="Show this help message and exit.")
     ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
-                    help=f"The path to the configuration file.  This may be "
-                         f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
+                    help=f"The path to the configuration file.  If "
                          f"not specified, defaults to "
                          f"`{gvutils.Config.default_config_file_path}`.")
-    ap.add_argument("--dry-run", action="store_true", help="TODO")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Print the notification to `stdout` instead of "
+                         "executing `notify_command`.")
+    ap.add_argument("--past", metavar="DURATION",
+                    help="Examine only log events from the past DURATION.  "
+                         "DURATION may be of the form 1h23m45s, 120m, 1.5h, "
+                         "etc.  If not specified, defaults to the past 15 "
+                         "minutes.")
     ap.add_argument("--log-directory",
                     help="Path to the directory containing "
                          "GoveeBTTempLogger's log files.")
@@ -112,16 +156,6 @@ def main(argv: typing.List[str]) -> int:
     log_directory = args.log_directory or config.log_directory or os.getcwd()
     if not os.path.isdir(log_directory):
         raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
-
-    # For each device in the config file, find the latest log file, read the
-    # last temperature reading, compare against constraints in the config file.
-    #
-    # Might need to compare against multiple log files to handle month
-    # transitions.
-    #
-    # Need to define exactly what we're scanning for.
-    # A. Entries within a specified timespan from current?
-    # B. Entries within a specified timespan from latest entry?
 
     if not config.notify_command:
         raise gvutils.AbortError(f"{__name__} requires `notify_command` to "
@@ -145,7 +179,10 @@ def main(argv: typing.List[str]) -> int:
         raise gvutils.AbortError(f"No log files found in {log_directory}")
 
     now = datetime.datetime.now(tz=datetime.timezone.utc)
-    delta = datetime.timedelta(minutes=15)
+
+    delta = (parse_duration(args.past)
+             if args.past
+             else datetime.timedelta(minutes=15))
     start = now - delta
 
     recent_logs = {address: [log_file]
