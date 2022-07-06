@@ -40,6 +40,7 @@ if not gvutils.has_python_version(__file__, (3, 8, 0)):
     sys.exit(1)
 
 
+@gvutils.entrypoint
 def main(argv: typing.List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.strip(), add_help=False)
     ap.add_argument("-h", "--help", action="help",
@@ -52,7 +53,7 @@ def main(argv: typing.List[str]) -> int:
                     help=f"The path to the configuration file.  This may be "
                          f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
                          f"not specified, defaults to "
-                         f"`{gvutils.Config.default_config_file_path}`.")
+                         f"`{gvutils.Config.default_config_file_path_raw}`.")
     ap.add_argument("--header", metavar="VALUE",
                     type=gvutils.parse_bool,
                     default=True,
@@ -143,33 +144,11 @@ def main(argv: typing.List[str]) -> int:
         raise gvutils.AbortError(f"No log file found for the specified device "
                                  f"and date: {log_file_path}")
 
-    log_line_re = re.compile(r"^"
-                             r"(?P<timestamp>\d{4}-\d{2}-\d{2}"
-                             r"\s+"
-                             r"\d{2}:\d{2}:\d{2}"
-                             r")"
-                             r"\s+"
-                             r"(?P<centigrade>[^\s]+)"
-                             r"\s+"
-                             r"(?P<humidity>\d+[.]?\d*)"
-                             r"\s+"
-                             r"(?P<battery>\d+)"
-                             r"(?:"
-                             r"\s+"
-                             r"(?P<model>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade2>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade3>[^\s]+)"
-                             r"\s+"
-                             r"(?P<centigrade4>[^\s]+)"
-                             r")?")
-
     with open(log_file_path) as f, \
          python_cli_utils.paged_output() as out:
         first = True
         for line in f:
-            match = log_line_re.match(line)
+            match = gvutils.log_line_re.match(line)
             if not match:
                 continue
             timestamp = \
@@ -221,19 +200,4 @@ def main(argv: typing.List[str]) -> int:
 
 if __name__ == "__main__":
     __name__ = os.path.basename(__file__)  # pylint: disable=redefined-builtin
-    try:
-        sys.exit(main(sys.argv))
-    except gvutils.AbortError as e:
-        if not e.cancelled:
-            print(f"{__name__}: {e}", file=sys.stderr)
-        sys.exit(e.exit_code)
-    except KeyboardInterrupt:
-        sys.exit(1)
-    except BrokenPipeError:
-        # From <https://docs.python.org/3/library/signal.html#note-on-sigpipe>:
-        #
-        # Python flushes standard streams on exit; redirect remaining output
-        # to devnull to avoid another BrokenPipeError at shutdown.
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
-        sys.exit(1)  # Python exits with error code 1 on EPIPE.
+    sys.exit(main(sys.argv))

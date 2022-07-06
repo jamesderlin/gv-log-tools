@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+
+# gv-notify
+#
+# Copyright (C) 2022 James D. Lin
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+Generates notifications if a Govee thermometer reports a temperature outside of
+an expected range.  Expected to be executed periodically (such as via `cron`).
+"""
+
+import argparse
+import datetime
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import typing
+
+import gvutils
+
+# Untested with earlier versions.
+if not gvutils.has_python_version(__file__, (3, 8, 0)):
+    sys.exit(1)
+
+
+def is_executable_file(path: str) -> bool:
+    """
+    Returns `True` if the file specified by `path` is an executable file,
+    `False` otherwise.
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return False
+    else:
+        mask = stat.S_IFREG | stat.S_IXUSR
+        return (info.st_mode & mask) == mask
+
+
+def parse_duration(s: str) -> datetime.timedelta:
+    """
+    Parses a duration (a `datetime.timedelta`) from a string.
+
+    Examples:
+    ```python
+    parse_duration("1d23m45s")
+    parse_duration("120m")
+    parse_duration("1.5h")
+    parse_duration("0.125s")
+    ```
+    """
+    # For simplicity, this RE is not strict and permits some invalid values.
+    # Invalid values will be handled later.
+    duration_re = re.compile(r"(?:(?P<days>[0-9.]+)d)?"
+                             r"(?:(?P<hours>[0-9.]+)h)?"
+                             r"(?:(?P<minutes>[0-9.]+)m)?"
+                             r"(?:(?P<seconds>[0-9.]+)s)?")
+    match = duration_re.fullmatch(s)
+    if not match or not s:
+        raise ValueError(f"Failed to parse a duration from \"{s}\"")
+    try:
+        return datetime.timedelta(days=float(match.group("days") or 0),
+                                  hours=float(match.group("hours") or 0),
+                                  minutes=float(match.group("minutes") or 0),
+                                  seconds=float(match.group("seconds") or 0))
+    except ValueError as e:
+        raise ValueError(f"Failed to parse a duration from \"{s}\"") from e
+
+
+def get_out_of_range_values(
+    log_path: str,
+    *,
+    after: datetime.datetime,
+    min: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
+    max: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
+) -> typing.Generator[typing.Tuple[datetime.datetime, gvutils.Temperature],
+                      None,
+                      None]:
+    """
+    A generator that yields `(timestamp, temperature)` tuples for all logged
+    events in `log_path` after (and including) `after` and that report
+    temperatures outside of the range specified by `min` and `max`.
+    """
+    with open(log_path) as f:
+        for line in f:
+            match = gvutils.log_line_re.match(line)
+            if not match:
+                continue
+
+            timestamp = \
+                (datetime.datetime.fromisoformat(match.group("timestamp"))
+                 .replace(tzinfo=datetime.timezone.utc))
+            if timestamp < after:
+                continue
+
+            centigrades = (
+                float(match.group("centigrade")),
+                *(float(s)
+                  for s in (match.group(f"centigrade{i}")
+                            for i in range(2, 5))
+                  if s),
+            )
+            temperatures = (gvutils.Temperature(degrees_c=c)
+                            for c in centigrades)
+            for t in temperatures:
+                if min is not None and t < min:
+                    t.preferred_unit = min.preferred_unit
+                elif max is not None and t > max:
+                    t.preferred_unit = max.preferred_unit
+                else:
+                    continue
+                yield (timestamp, t)
+
+
+_epilog = f"""\
+%(prog)s relies on `{gvutils.Config.default_config_file_path_raw}` for
+configuration.  The configuration file should have a section for each Govee
+thermometer named with its Bluetooth address.  Each of those sections may have
+a `min_temperature` entry, a `max_temperature` entry, or both to specifies the
+expected  temperature limits.  Temperatures may be expressed in either
+Celsius (e.g. `4.4C`) or Fahrenheit (e.g. `40F`).  If any thermometer reports
+a temperature outside of its limits within the time interval specified by
+`--past` (15 minutes by default), %(prog)s will execute the notification
+command and supply a notification message as its input (via stdin).
+
+The notification command is specified `by the `notify_command` entry in the
+`[config]` section of the configuration file.  If not specified, or if
+called with the `--dry-run` option, %(prog)s instead will print the
+notification message to stdout and exit.
+
+Example configuration:
+```
+[config]
+notify_command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
+
+[A4:C1:38:01:23:45]
+name=Kitchen Refrigerator
+max_temperature=5C
+```
+"""
+
+
+@gvutils.entrypoint
+def main(argv: typing.List[str]) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__.strip(),
+        epilog=_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
+    ap.add_argument("-h", "--help", action="help",
+                    help="Show this help message and exit.")
+    ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
+                    help=f"The path to the configuration file.  If "
+                         f"not specified, defaults to "
+                         f"`{gvutils.Config.default_config_file_path_raw}`.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Print the notification to `stdout` instead of "
+                         "executing `notify_command`.")
+    ap.add_argument("--past", metavar="DURATION",
+                    help="Examine only log events from the past DURATION.  "
+                         "DURATION may be of the form 1h23m45s, 120m, 1.5h, "
+                         "etc.  If not specified, defaults to the past 15 "
+                         "minutes.")
+    ap.add_argument("--log-directory",
+                    help="Path to the directory containing "
+                         "GoveeBTTempLogger's log files.")
+    ap.add_argument("--utc", action="store_true",
+                    help="Show times as UTC times instead of in the local "
+                         "time.")
+    args = ap.parse_args(argv[1:])
+
+    config = gvutils.Config(args.config_file_path)
+
+    log_directory = args.log_directory or config.log_directory or os.getcwd()
+    if not os.path.isdir(log_directory):
+        raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
+
+    command: typing.List[str] = []
+    if config.notify_command:
+        command = [os.path.expanduser(token)
+                   for token in shlex.split(config.notify_command)]
+
+        if not os.path.isabs(command[0]):
+            command[0] = (os.path.abspath(command[0])
+                          if is_executable_file(command[0])
+                          else (shutil.which(command[0]) or command[0]))
+        elif not is_executable_file(command[0]):
+            raise gvutils.AbortError(f"\"{command[0]}\" is not an executable "
+                                     f"file.")
+
+    log_table = gvutils.generate_log_lookup_table(log_directory)
+    if not log_table:
+        raise gvutils.AbortError(f"No log files found in {log_directory}")
+
+    now = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    delta = (parse_duration(args.past)
+             if args.past
+             else datetime.timedelta(minutes=15))
+    start = now - delta
+
+    recent_logs = {address: [log_file]
+                   for (address, log_file)
+                   in log_table.get((start.year, start.month), {}).items()}
+    if start.month != now.month:
+        for (address, log_file) in log_table.get((now.year, now.month),
+                                                 {}).items():
+            recent_logs.setdefault(address, []).append(log_file)
+
+    flagged: typing.Dict[str, typing.List[typing.Tuple[datetime.datetime,
+                                                       gvutils.Temperature]]] \
+        = {}
+    for (address, log_list) in recent_logs.items():
+        device = config.devices[address]
+        if device.max_temperature is None and device.min_temperature is None:
+            continue
+
+        for log_file in log_list:
+            values = list(get_out_of_range_values(os.path.join(log_directory,
+                                                               log_file),
+                                                  after=start,
+                                                  min=device.min_temperature,
+                                                  max=device.max_temperature))
+            if values:
+                flagged[device.address] = values
+
+    message_lines: typing.List[str] = []
+    for (address, data) in flagged.items():
+        device = config.devices[address]
+
+        # pylint: disable=redefined-builtin
+        min = device.min_temperature
+        max = device.max_temperature
+
+        if min is not None and max is not None:
+            reason = f"Values out of range [{min}, {max}]"
+        elif max is not None:
+            reason = f"Values above {max}"
+        elif min is not None:
+            reason = f"Values below {min}"
+        else:
+            assert False
+
+        message_lines.append(f"{device}: {reason}:")
+        for (timestamp, temperature) in data:
+            timestamp = timestamp.astimezone(datetime.timezone.utc
+                                             if args.utc else None)
+            message_lines.append(f"  {timestamp} {temperature}")
+
+    if not message_lines:
+        return 0
+
+    message = "\n".join(message_lines)
+    if args.dry_run or not command:
+        print(message)
+        return 0
+
+    result = subprocess.run(command, input=message, text=True, check=False)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    __name__ = os.path.basename(__file__)  # pylint: disable=redefined-builtin
+    sys.exit(main(sys.argv))
