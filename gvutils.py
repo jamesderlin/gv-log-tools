@@ -215,13 +215,14 @@ class Config:
                 raise AbortError(f"\"{self.config_file_path}\" is not a valid "
                                  f"configuration file.") from e
 
-        if cp.has_section("common"):
-            common_section = cp["common"]
-        elif cp.has_section("config"):
-            # For backward compatibility with the old section name.
-            common_section = cp["config"]
+        # For backward compatibility with the old section name.
+        common_section_name = next((name
+                                    for name in ("common", "config")
+                                    if cp.has_section(name)),
+                                   "")
 
-        if common_section:
+        if common_section_name:
+            common_section = cp[common_section_name]
             self.log_directory = os.path.expanduser(
                 common_section.get("log_directory", "") or "",
             )
