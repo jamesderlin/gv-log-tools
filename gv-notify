@@ -19,7 +19,7 @@
 
 """
 Generates notifications if a Govee thermometer reports a temperature outside of
-an expected range.
+an expected range.  Expected to be executed periodically (such as via `cron`).
 """
 
 import argparse
@@ -129,15 +129,48 @@ def get_out_of_range_values(
                 yield (timestamp, t)
 
 
+_epilog = f"""\
+%(prog)s relies on `{gvutils.Config.default_config_file_path_raw}` for
+configuration.  The configuration file should have a section for each Govee
+thermometer named with its Bluetooth address.  Each of those sections may have
+a `min_temperature` entry, a `max_temperature` entry, or both to specifies the
+expected  temperature limits.  Temperatures may be expressed in either
+Celsius (e.g. `4.4C`) or Fahrenheit (e.g. `40F`).  If any thermometer reports
+a temperature outside of its limits within the time interval specified by
+`--past` (15 minutes by default), %(prog)s will execute the notification
+command and supply a notification message as its input (via stdin).
+
+The notification command is specified `by the `notify_command` entry in the
+`[config]` section of the configuration file.  If not specified, or if
+called with the `--dry-run` option, %(prog)s instead will print the
+notification message to stdout and exit.
+
+Example configuration:
+```
+[config]
+notify_command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
+
+[A4:C1:38:01:23:45]
+name=Kitchen Refrigerator
+max_temperature=5C
+```
+"""
+
+
 @gvutils.entrypoint
 def main(argv: typing.List[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.strip(), add_help=False)
+    ap = argparse.ArgumentParser(
+        description=__doc__.strip(),
+        epilog=_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
     ap.add_argument("-h", "--help", action="help",
                     help="Show this help message and exit.")
     ap.add_argument("--config", metavar="CONFIG_FILE", dest="config_file_path",
                     help=f"The path to the configuration file.  If "
                          f"not specified, defaults to "
-                         f"`{gvutils.Config.default_config_file_path}`.")
+                         f"`{gvutils.Config.default_config_file_path_raw}`.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the notification to `stdout` instead of "
                          "executing `notify_command`.")
@@ -160,22 +193,18 @@ def main(argv: typing.List[str]) -> int:
     if not os.path.isdir(log_directory):
         raise gvutils.AbortError(f"\"{log_directory}\" is not a directory.")
 
-    if not config.notify_command:
-        raise gvutils.AbortError(f"{__name__} requires `notify_command` to "
-                                 f"be set in the `[config]` section of "
-                                 f"{config.config_file_path}.  Run "
-                                 f"`{__name__} --help` for details.")
+    command: typing.List[str] = []
+    if config.notify_command:
+        command = [os.path.expanduser(token)
+                   for token in shlex.split(config.notify_command)]
 
-    command = [os.path.expanduser(token)
-               for token in shlex.split(config.notify_command)]
-
-    if not os.path.isabs(command[0]):
-        command[0] = (os.path.abspath(command[0])
-                      if is_executable_file(command[0])
-                      else (shutil.which(command[0]) or command[0]))
-    elif not is_executable_file(command[0]):
-        raise gvutils.AbortError(f"\"{command[0]}\" is not an executable "
-                                 f"file.")
+        if not os.path.isabs(command[0]):
+            command[0] = (os.path.abspath(command[0])
+                          if is_executable_file(command[0])
+                          else (shutil.which(command[0]) or command[0]))
+        elif not is_executable_file(command[0]):
+            raise gvutils.AbortError(f"\"{command[0]}\" is not an executable "
+                                     f"file.")
 
     log_table = gvutils.generate_log_lookup_table(log_directory)
     if not log_table:
@@ -240,7 +269,7 @@ def main(argv: typing.List[str]) -> int:
         return 0
 
     message = "\n".join(message_lines)
-    if args.dry_run:
+    if args.dry_run or not command:
         print(message)
         return 0
 

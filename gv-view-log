@@ -53,7 +53,7 @@ def main(argv: typing.List[str]) -> int:
                     help=f"The path to the configuration file.  This may be "
                          f"GoveeBTTempLogger's `gvh-titlemap.txt` file.  If "
                          f"not specified, defaults to "
-                         f"`{gvutils.Config.default_config_file_path}`.")
+                         f"`{gvutils.Config.default_config_file_path_raw}`.")
     ap.add_argument("--header", metavar="VALUE",
                     type=gvutils.parse_bool,
                     default=True,

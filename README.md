@@ -7,6 +7,10 @@ Bluetooth thermometers.
   in a friendlier format.  Allows viewing logs for the thermometer with the
   specified name and date and prints timestamps in the local timezone.
 
+* `gv-notify`: Generates notifications if a Govee thermometer reports a
+  temperature outside of an expected range.  Expected to be executed
+  periodically (such as via `cron`).
+
 
 ## Installation
 
@@ -29,6 +33,7 @@ Optionally add a `~/.config/gv-log-tools/gv-log-tools.rc` file:
 # Optional.  The GoveeBTTempLogger title map file.  If specified, overrides
 # any user-friendly names specified in this file.
 map_file=/var/www/html/goveebttemplogger/gvh-titlemap.txt
+notify_command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
 
 # Optional.  The default log directory used by GoveeBTTempLogger.  If not
 # specified, read logs from the current directory.
@@ -39,8 +44,16 @@ log_directory=/var/log/goveebttemplogger
 # Optional.  User-friendly name.
 name=Kitchen Refrigerator
 
+# Optional.  The expected temperature range.  Temperatures outside of this
+# range will be reported by `gv-notify`.  Temperatures may be expressed in
+# Celsius or Fahrenheit.  The range may be expressed by a minimum, a maximum,
+# or both.
+min_temperature=0C
+max_temperature=40F
+
 [A4:C1:38:67:89:AB]
 name=Garage Chest Freezer
+max_temperature=-10C
 ```
 
 

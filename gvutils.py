@@ -170,9 +170,7 @@ class DeviceConfig:
 
 class Config:
     """Settings read from the configuration file."""
-    default_config_file_path = os.path.expanduser(
-        "~/.config/gv-log-tools/gv-log-tools.rc",
-    )
+    default_config_file_path_raw = "~/.config/gv-log-tools/gv-log-tools.rc"
 
     def __init__(self, path: typing.Optional[str]) -> None:
         """
@@ -193,7 +191,9 @@ class Config:
                 raise AbortError(f"File not found: {path}")
             self.config_file_path = path
         else:
-            self.config_file_path = Config.default_config_file_path
+            self.config_file_path = os.path.expanduser(
+                Config.default_config_file_path_raw,
+            )
             if not os.path.isfile(self.config_file_path):
                 return
 
