@@ -215,13 +215,18 @@ class Config:
                 raise AbortError(f"\"{self.config_file_path}\" is not a valid "
                                  f"configuration file.") from e
 
-        if cp.has_section("config"):
-            main_section = cp["config"]
+        if cp.has_section("common"):
+            common_section = cp["common"]
+        elif cp.has_section("config"):
+            # For backward compatibility with the old section name.
+            common_section = cp["config"]
+
+        if common_section:
             self.log_directory = os.path.expanduser(
-                main_section.get("log_directory", "") or "",
+                common_section.get("log_directory", "") or "",
             )
 
-            map_file = os.path.expanduser(main_section.get("map_file") or "")
+            map_file = os.path.expanduser(common_section.get("map_file") or "")
             if map_file:
                 try:
                     # pylint: disable=consider-using-with
@@ -233,7 +238,8 @@ class Config:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
 
-            self.notify_command = main_section.get("notify_command")
+        if cp.has_section("notify"):
+            self.notify_command = cp["notify"].get("command")
 
         def parse_entry(
             section: str,

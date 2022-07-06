@@ -21,6 +21,10 @@
 Generates notifications if a Govee thermometer reports a temperature outside of
 an expected range.  Expected to be executed periodically (such as via `cron`).
 """
+# TODO:
+# * Add option to throttle notification output.
+# * Add ability to notify for humidity or battery levels.
+# * Add ability to restrict notifications to specified devices?
 
 import argparse
 import datetime
@@ -140,15 +144,15 @@ a temperature outside of its limits within the time interval specified by
 `--past` (15 minutes by default), %(prog)s will execute the notification
 command and supply a notification message as its input (via stdin).
 
-The notification command is specified `by the `notify_command` entry in the
-`[config]` section of the configuration file.  If not specified, or if
-called with the `--dry-run` option, %(prog)s instead will print the
-notification message to stdout and exit.
+The notification command is specified by the `command` entry in the `[notify]`
+section of the configuration file.  If not specified, or if called with the
+`--dry-run` option, %(prog)s instead will print the notification message to
+stdout and exit.
 
 Example configuration:
 ```
-[config]
-notify_command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
+[notify]
+command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
 
 [A4:C1:38:01:23:45]
 name=Kitchen Refrigerator
@@ -173,7 +177,7 @@ def main(argv: typing.List[str]) -> int:
                          f"`{gvutils.Config.default_config_file_path_raw}`.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the notification to `stdout` instead of "
-                         "executing `notify_command`.")
+                         "executing the notify command.")
     ap.add_argument("--past", metavar="DURATION",
                     help="Examine only log events from the past DURATION.  "
                          "DURATION may be of the form 1h23m45s, 120m, 1.5h, "
@@ -251,11 +255,11 @@ def main(argv: typing.List[str]) -> int:
         max = device.max_temperature
 
         if min is not None and max is not None:
-            reason = f"Values out of range [{min}, {max}]"
+            reason = f"Temperatures out of range [{min}, {max}]"
         elif max is not None:
-            reason = f"Values above {max}"
+            reason = f"Temperatures above {max}"
         elif min is not None:
-            reason = f"Values below {min}"
+            reason = f"Temperatures below {min}"
         else:
             assert False
 
@@ -264,6 +268,7 @@ def main(argv: typing.List[str]) -> int:
             timestamp = timestamp.astimezone(datetime.timezone.utc
                                              if args.utc else None)
             message_lines.append(f"  {timestamp} {temperature}")
+        message_lines.append("")
 
     if not message_lines:
         return 0

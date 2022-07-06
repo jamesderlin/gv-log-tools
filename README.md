@@ -29,15 +29,18 @@ git clone --recurse-submodules https://github.com/jamesderlin/gv-log-tools.git
 Optionally add a `~/.config/gv-log-tools/gv-log-tools.rc` file:
 
 ```ini
-[config]
+[common]
 # Optional.  The GoveeBTTempLogger title map file.  If specified, overrides
 # any user-friendly names specified in this file.
 map_file=/var/www/html/goveebttemplogger/gvh-titlemap.txt
-notify_command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
 
 # Optional.  The default log directory used by GoveeBTTempLogger.  If not
 # specified, read logs from the current directory.
 log_directory=/var/log/goveebttemplogger
+
+# Configuration for `gv-notify`.
+[notify]
+command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
 
 # A Bluetooth address for a Govee thermometer.
 [A4:C1:38:01:23:45]
