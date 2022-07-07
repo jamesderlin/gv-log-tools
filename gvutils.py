@@ -20,6 +20,7 @@ Common utility classes and functions shared among govee_thermometer_utils
 scripts.
 """
 
+import argparse
 import collections
 import configparser
 import enum
@@ -35,6 +36,8 @@ bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
 whitespace_re = re.compile(r"\s+")
 
 temperature_re = re.compile(r"(?P<degrees>[^\s]+)\s*(?P<units>[CF])")
+
+percentage_re = re.compile(r"(?P<percentage>\d+)%?")
 
 map_file_re = re.compile("".join(
     (r"(?P<address>",
@@ -139,6 +142,22 @@ def entrypoint(
     return wrapper
 
 
+def wrap_parse_arg(
+    parse: typing.Callable[[str], typing.Any],
+) -> typing.Callable[[str], typing.Any]:
+    """
+    Wraps a parsing function for use with `argparse`, converting raised
+    `ValueError`s to `argparse.ArgumentTypeError`s while retaining the
+    error message.
+    """
+    def wrapper(s: str) -> typing.Any:
+        try:
+            return parse(s)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from e
+    return wrapper
+
+
 def parse_bool(s: str) -> bool:
     """Parses a boolean value from a string."""
     s = s.lower()
@@ -146,7 +165,15 @@ def parse_bool(s: str) -> bool:
         return True
     elif s in ("0", "false", "no", "n", "off"):
         return False
-    raise AbortError(f"Invalid boolean value: {s}")
+    raise ValueError(f"Invalid boolean value: {s}")
+
+
+def parse_percentage(s: str) -> int:
+    """Parses a percentage from a string."""
+    match = percentage_re.fullmatch(s.strip())
+    if not match:
+        raise ValueError(f"Invalid percentage: {s}")
+    return int(match.group("percentage"))
 
 
 class DeviceConfig:
@@ -161,6 +188,7 @@ class DeviceConfig:
         self.name = name
         self.min_temperature = None
         self.max_temperature = None
+        self.min_battery = None
 
     def __str__(self) -> str:
         return (f"{self.name} ({self.address})"
@@ -215,6 +243,27 @@ class Config:
                 raise AbortError(f"\"{self.config_file_path}\" is not a valid "
                                  f"configuration file.") from e
 
+        def parse_entry(
+            section: str,
+            key: str,
+            parse_value: typing.Callable[[str], typing.Any],
+            *,
+            default: typing.Any = None,
+        ) -> typing.Any:
+            try:
+                value = cp[section].get(key)
+                if value is None:
+                    return default
+                elif value == "":
+                    return None
+                return parse_value(value)
+            except ValueError as e:
+                raise AbortError(f"{e} (for `{key}` in section [{section}] in "
+                                 f"{self.config_file_path})") from e
+
+        default_min_temperature = None
+        default_max_temperature = None
+
         # For backward compatibility with the old section name.
         common_section_name = next((name
                                     for name in ("common", "config")
@@ -239,22 +288,18 @@ class Config:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
 
+            default_min_temperature = parse_entry(common_section_name,
+                                                  "min_temperature",
+                                                  Temperature.parse)
+            default_max_temperature = parse_entry(common_section_name,
+                                                  "max_temperature",
+                                                  Temperature.parse)
+            default_min_battery = parse_entry(common_section_name,
+                                              "min_battery",
+                                              parse_percentage)
+
         if cp.has_section("notify"):
             self.notify_command = cp["notify"].get("command")
-
-        def parse_entry(
-            section: str,
-            key: str,
-            parse_value: typing.Callable[[str], typing.Any],
-        ) -> typing.Any:
-            try:
-                value = cp[section].get(key)
-                if value is None:
-                    return None
-                return parse_value(value)
-            except ValueError as e:
-                raise AbortError(f"{e} (for `{key}` in section [{section}] in "
-                                 f"{self.config_file_path})") from e
 
         for section_name in cp:
             if not bluetooth_address_re.fullmatch(section_name):
@@ -267,12 +312,24 @@ class Config:
                                              DeviceConfig(address=address,
                                                           name=name))
 
-            device.min_temperature = parse_entry(section_name,
-                                                 "min_temperature",
-                                                 Temperature.parse)
-            device.max_temperature = parse_entry(section_name,
-                                                 "max_temperature",
-                                                 Temperature.parse)
+            device.min_temperature = parse_entry(
+                section_name,
+                "min_temperature",
+                Temperature.parse,
+                default=default_min_temperature,
+            )
+            device.max_temperature = parse_entry(
+                section_name,
+                "max_temperature",
+                Temperature.parse,
+                default=default_max_temperature,
+            )
+            device.min_battery = parse_entry(
+                section_name,
+                "min_battery",
+                parse_percentage,
+                default=default_min_battery,
+            )
 
 
 def parse_map_file(

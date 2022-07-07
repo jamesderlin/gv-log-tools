@@ -55,7 +55,7 @@ def main(argv: typing.List[str]) -> int:
                          f"not specified, defaults to "
                          f"`{gvutils.Config.default_config_file_path_raw}`.")
     ap.add_argument("--header", metavar="VALUE",
-                    type=gvutils.parse_bool,
+                    type=gvutils.wrap_parse_arg(gvutils.parse_bool),
                     default=True,
                     help="Set to `0` to suppress printing the device name and "
                          "column headings; set to `1` (the default) to print "
