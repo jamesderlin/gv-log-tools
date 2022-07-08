@@ -23,6 +23,8 @@ scripts.
 import argparse
 import collections
 import configparser
+import dataclasses
+import datetime
 import enum
 import functools
 import os
@@ -170,7 +172,7 @@ def parse_bool(s: str) -> bool:
 
 def parse_percentage(s: str) -> int:
     """Parses a percentage from a string."""
-    match = percentage_re.fullmatch(s.strip())
+    match = percentage_re.fullmatch(s)
     if not match:
         raise ValueError(f"Invalid percentage: {s}")
     return int(match.group("percentage"))
@@ -254,7 +256,9 @@ class Config:
                 value = cp[section].get(key)
                 if value is None:
                     return default
-                elif value == "":
+
+                value = value.strip()
+                if value == "":
                     return None
                 return parse_value(value)
             except ValueError as e:
@@ -399,6 +403,54 @@ def chunk_address(address: str) -> str:
     return ":".join((address[i : (i + 2)] for i in range(0, len(address), 2)))
 
 
+@dataclasses.dataclass
+class LogLine:
+    """Stores data parsed from a line of a GoveeBTTempLogger log file."""
+    timestamp: datetime.datetime
+    centigrades: typing.List[float]
+    humidity: float
+    battery: int
+
+
+def parse_log_lines(
+    log_path: str,
+    predicate: typing.Optional[typing.Callable[[datetime.datetime],
+                                               bool]] = None,
+) -> typing.Generator[LogLine, None, None]:
+    """
+    A generator that yields a `LogLine` for each line in the file specified by
+    `log_path` if calling `predicate` on the line's timestamp returns `True`.
+    """
+    with open(log_path) as f:
+        for line in f:
+            match = log_line_re.match(line)
+            if not match:
+                continue
+
+            timestamp = \
+                (datetime.datetime.fromisoformat(match.group("timestamp"))
+                 .replace(tzinfo=datetime.timezone.utc))
+
+            if predicate is not None and not predicate(timestamp):
+                continue
+
+            centigrades = [
+                float(match.group("centigrade")),
+                *(float(s)
+                  for s in (match.group(f"centigrade{i}")
+                            for i in range(2, 5))
+                  if s),
+            ]
+
+            humidity = float(match.group("humidity"))
+            battery = int(match.group("battery"))
+
+            yield LogLine(timestamp=timestamp,
+                          centigrades=centigrades,
+                          humidity=humidity,
+                          battery=battery)
+
+
 def fahrenheit_from_centigrade(degrees_c: float) -> float:
     """Converts a temperature from degrees centigrade to degrees Fahrenheit."""
     return degrees_c * 9 / 5 + 32
@@ -444,7 +496,7 @@ class Temperature:
         ```
         Accepted units are `"C"` and `"F"`.  Case is ignored.
         """
-        match = temperature_re.fullmatch(s.strip().upper())
+        match = temperature_re.fullmatch(s.upper())
         if not match:
             raise ValueError(f"Invalid temperature: {s}")
         try:
