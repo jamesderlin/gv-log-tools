@@ -24,10 +24,10 @@ an expected range.  Expected to be executed periodically (such as via `cron`).
 # TODO:
 # * Add option to throttle notification output.
 #   * Report min/max values instead?
-# * Add ability to notify for humidity or battery levels.
 # * Add ability to restrict notifications to specified devices?
 
 import argparse
+import dataclasses
 import datetime
 import os
 import re
@@ -89,15 +89,22 @@ def parse_duration(s: str) -> datetime.timedelta:
         raise ValueError(f"Failed to parse a duration from \"{s}\"") from e
 
 
+@dataclasses.dataclass
+class NotificationReport:
+    """Stores out-of-range thermometer data."""
+    temperatures: typing.List[typing.Tuple[datetime.datetime,
+                                           gvutils.Temperature]]
+    humidities: typing.List[typing.Tuple[datetime.datetime, float]]
+    min_battery: int
+
+
 def get_out_of_range_values(
     log_path: str,
     *,
     after: datetime.datetime,
-    min: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
-    max: typing.Optional[gvutils.Temperature],  # pylint: disable=redefined-builtin
-) -> typing.Generator[typing.Tuple[datetime.datetime, gvutils.Temperature],
-                      None,
-                      None]:
+    expected_temperatures: gvutils.Range[gvutils.Temperature],
+    expected_humidities: gvutils.Range[float],
+) -> NotificationReport:
     """
     A generator that yields `(timestamp, temperature)` tuples for all logged
     events in `log_path` after (and including) `after` and that report
@@ -106,22 +113,32 @@ def get_out_of_range_values(
     def is_after(timestamp: datetime.datetime) -> bool:
         return timestamp >= after
 
+    report = NotificationReport(temperatures=[],
+                                humidities=[],
+                                min_battery=100)
+
     for log_line in gvutils.parse_log_lines(log_path, is_after):
         temperatures = (gvutils.Temperature(degrees_c=c)
                         for c in log_line.centigrades)
         for t in temperatures:
-            if min is not None and t < min:
-                t.preferred_unit = min.preferred_unit
-            elif max is not None and t > max:
-                t.preferred_unit = max.preferred_unit
+            result = expected_temperatures.compare(t)
+            if result == gvutils.RangeResult.TOO_LOW:
+                assert expected_temperatures.lower is not None
+                t.preferred_unit = expected_temperatures.lower.preferred_unit
+            elif result == gvutils.RangeResult.TOO_HIGH:
+                assert expected_temperatures.upper is not None
+                t.preferred_unit = expected_temperatures.upper.preferred_unit
             else:
                 continue
-            yield (log_line.timestamp, t)
+            report.temperatures.append((log_line.timestamp, t))
 
-        # TODO: Compute average (minimum?) battery level and report once.
-        #battery = int(match.group("battery"))
-        # TODO: Return a custom object for out-of-range temperature values,
-        # humidity values, battery value
+        rh = log_line.humidity
+        if expected_humidities.compare(rh) != gvutils.RangeResult.IN_RANGE:
+            report.humidities.append((log_line.timestamp, rh))
+
+        report.min_battery = min(report.min_battery, log_line.battery)
+
+    return report
 
 
 _epilog = f"""\
@@ -225,32 +242,35 @@ def main(argv: typing.List[str]) -> int:
                                                   gvutils.Temperature]]] = {}
     for (address, log_list) in recent_logs.items():
         device = config.devices[address]
-        if device.max_temperature is None and device.min_temperature is None:
+        if (not device.expected_temperatures.is_set()
+                and not device.expected_humidities.is_set()
+                and device.min_battery is not None):
             continue
 
         for log_file in log_list:
-            values = list(get_out_of_range_values(os.path.join(log_directory,
-                                                               log_file),
-                                                  after=start,
-                                                  min=device.min_temperature,
-                                                  max=device.max_temperature))
-            if values:
-                flagged[device.address] = values
+            report = get_out_of_range_values(
+                os.path.join(log_directory, log_file),
+                after=start,
+                expected_temperatures=device.expected_temperatures,
+                expected_humidities=device.expected_humidities,
+            )
+
+            # TODO: Rewrite this for humidity and battery.
+            if report.temperatures:
+                flagged[device.address] = report.temperatures
 
     message_lines: typing.List[str] = []
     for (address, data) in flagged.items():
         device = config.devices[address]
 
-        # pylint: disable=redefined-builtin
-        min = device.min_temperature
-        max = device.max_temperature
+        r = device.expected_temperatures
 
-        if min is not None and max is not None:
-            reason = f"Temperatures out of range [{min}, {max}]"
-        elif max is not None:
-            reason = f"Temperatures above {max}"
-        elif min is not None:
-            reason = f"Temperatures below {min}"
+        if r.lower is not None and r.upper is not None:
+            reason = f"Temperatures out of range {r}"
+        elif r.upper is not None:
+            reason = f"Temperatures above {r.upper}"
+        elif r.lower is not None:
+            reason = f"Temperatures below {r.lower}"
         else:
             assert False
 

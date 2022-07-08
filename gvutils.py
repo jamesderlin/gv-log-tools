@@ -188,9 +188,9 @@ class DeviceConfig:
     ) -> None:
         self.address = address.upper()
         self.name = name
-        self.min_temperature = None
-        self.max_temperature = None
-        self.min_battery = None
+        self.expected_temperatures: Range[Temperature] = Range(None, None)
+        self.expected_humidities: Range[float] = Range(None, None)
+        self.min_battery: typing.Optional[int] = None
 
     def __str__(self) -> str:
         return (f"{self.name} ({self.address})"
@@ -316,13 +316,13 @@ class Config:
                                              DeviceConfig(address=address,
                                                           name=name))
 
-            device.min_temperature = parse_entry(
+            device.expected_temperatures.lower = parse_entry(
                 section_name,
                 "min_temperature",
                 Temperature.parse,
                 default=default_min_temperature,
             )
-            device.max_temperature = parse_entry(
+            device.expected_temperatures.upper = parse_entry(
                 section_name,
                 "max_temperature",
                 Temperature.parse,
@@ -522,3 +522,40 @@ class Temperature:
             return f"{self.degrees_c:.2f}C"
         else:
             return f"{fahrenheit_from_centigrade(self.degrees_c):.2f}F"
+
+
+T = typing.TypeVar("T")
+
+
+class RangeResult(enum.Enum):
+    """A result from `Range.compare`."""
+    TOO_LOW = enum.auto()
+    IN_RANGE = enum.auto()
+    TOO_HIGH = enum.auto()
+
+
+@dataclasses.dataclass
+class Range(typing.Generic[T]):
+    """An inclusive range."""
+    lower: typing.Optional[T]
+    upper: typing.Optional[T]
+
+    def __post_init__(self) -> None:
+        assert (self.lower is None or self.upper is None
+                or self.lower <= self.upper)  # type: ignore
+
+    def compare(self, value: T) -> RangeResult:
+        """Checks if the specified value is within the range."""
+        # XXX: Ignore type checks until there's a built-in `Comparable` type.
+        if self.lower is not None and value < self.lower:  # type: ignore
+            return RangeResult.TOO_LOW
+        if self.upper is not None and value > self.upper:  # type: ignore
+            return RangeResult.TOO_HIGH
+        return RangeResult.IN_RANGE
+
+    def is_set(self) -> bool:
+        """Returns `True` if the `Range` object has at least one bound set."""
+        return self.lower is not None or self.upper is not None
+
+    def __str__(self) -> str:
+        return f"[{self.lower}, {self.upper}]"
