@@ -390,9 +390,12 @@ def parse_map_file(
     return device_configs
 
 
+LogTable = typing.Dict[typing.Tuple[int, int], typing.Dict[str, str]]
+
+
 def generate_log_lookup_table(
     log_directory: str,
-) -> typing.Dict[typing.Tuple[int, int], typing.Dict[str, str]]:
+) -> LogTable:
     """
     Scans the specified directory for GoveeBTTempLogger log files and returns a
     lookup table that stores their filenames.  The table uses `tuple`s of
@@ -402,7 +405,7 @@ def generate_log_lookup_table(
     (2022, 7): {'01:23:45:67:89:AB': 'gvh507x_0123456789AB-2022-07.txt'}
     ```
     """
-    log_table: typing.Dict[typing.Tuple[int, int], typing.Dict[str, str]] = {}
+    log_table: LogTable = {}
     with os.scandir(log_directory) as dir_entries:
         for entry in dir_entries:
             if not entry.is_file():

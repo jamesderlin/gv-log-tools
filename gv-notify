@@ -45,6 +45,10 @@ if not gvutils.has_python_version(__file__, (3, 8, 0)):
     sys.exit(1)
 
 
+TemperatureEvent = typing.Tuple[datetime.datetime, gvutils.Temperature]
+FloatEvent = typing.Tuple[datetime.datetime, float]
+
+
 def is_executable_file(path: str) -> bool:
     """
     Returns `True` if the file specified by `path` is an executable file,
@@ -92,9 +96,8 @@ def parse_duration(s: str) -> datetime.timedelta:
 @dataclasses.dataclass
 class NotificationReport:
     """Stores out-of-range thermometer data."""
-    temperatures: typing.List[typing.Tuple[datetime.datetime,
-                                           gvutils.Temperature]]
-    humidities: typing.List[typing.Tuple[datetime.datetime, float]]
+    temperatures: typing.List[TemperatureEvent]
+    humidities: typing.List[FloatEvent]
     min_battery: int
 
 
@@ -237,9 +240,7 @@ def main(argv: typing.List[str]) -> int:
                                                  {}).items():
             recent_logs.setdefault(address, []).append(log_file)
 
-    flagged: typing.Dict[str,
-                         typing.List[typing.Tuple[datetime.datetime,
-                                                  gvutils.Temperature]]] = {}
+    flagged: typing.Dict[str, typing.List[TemperatureEvent]] = {}
     for (address, log_list) in recent_logs.items():
         device = config.devices[address]
         if (not device.expected_temperatures.is_set()
