@@ -78,6 +78,9 @@ log_line_re = re.compile(r"^"
                          r")?")
 
 
+T = typing.TypeVar("T")
+
+
 def has_python_version(
     script_file: str,
     version_tuple: typing.Tuple[int, ...],
@@ -145,14 +148,14 @@ def entrypoint(
 
 
 def wrap_parse_arg(
-    parse: typing.Callable[[str], typing.Any],
-) -> typing.Callable[[str], typing.Any]:
+    parse: typing.Callable[[str], T],
+) -> typing.Callable[[str], T]:
     """
     Wraps a parsing function for use with `argparse`, converting raised
     `ValueError`s to `argparse.ArgumentTypeError`s while retaining the
     error message.
     """
-    def wrapper(s: str) -> typing.Any:
+    def wrapper(s: str) -> T:
         try:
             return parse(s)
         except ValueError as e:
@@ -248,10 +251,10 @@ class Config:
         def parse_entry(
             section: str,
             key: str,
-            parse_value: typing.Callable[[str], typing.Any],
+            parse_value: typing.Callable[[str], T],
             *,
-            default: typing.Any = None,
-        ) -> typing.Any:
+            default: typing.Optional[T] = None,
+        ) -> typing.Optional[T]:
             try:
                 value = cp[section].get(key)
                 if value is None:
@@ -542,9 +545,6 @@ class Temperature:
             return f"{self.degrees_c:.2f}C"
         else:
             return f"{fahrenheit_from_centigrade(self.degrees_c):.2f}F"
-
-
-T = typing.TypeVar("T")
 
 
 class RangeResult(enum.Enum):
