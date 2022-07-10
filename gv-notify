@@ -22,13 +22,13 @@ Generates notifications if a Govee thermometer reports a temperature outside of
 an expected range.  Expected to be executed periodically (such as via `cron`).
 """
 # TODO:
-# * Add option to throttle notification output.
-#   * Report min/max values instead?
 # * Add ability to restrict notifications to specified devices?
 
 import argparse
 import dataclasses
 import datetime
+import functools
+import itertools
 import os
 import re
 import shlex
@@ -46,7 +46,6 @@ if not gvutils.has_python_version(__file__, (3, 8, 0)):
 
 
 TemperatureEvent = typing.Tuple[datetime.datetime, gvutils.Temperature]
-FloatEvent = typing.Tuple[datetime.datetime, float]
 
 
 def is_executable_file(path: str) -> bool:
@@ -103,52 +102,229 @@ def next_month(year_month: typing.Tuple[int, int]) -> typing.Tuple[int, int]:
     return (year + int(month > 12), (month - 1) % 12 + 1)
 
 
+def temperature_for_range(
+    r: gvutils.Range[gvutils.Temperature],
+    degrees_c: float,
+) -> gvutils.Temperature:
+    """
+    Converts a temperature in degrees centigrade to a `Temperature` object
+    using the same units as the nearer endpoint from the specified `Range`.
+    """
+    if r.lower is not None and r.upper is not None:
+        centigrade_mid = (r.lower.degrees_c + r.upper.degrees_c) / 2
+        unit = (r.lower.preferred_unit
+                if degrees_c < centigrade_mid
+                else r.upper.preferred_unit)
+    elif r.lower is not None:
+        unit = r.lower.preferred_unit
+    else:
+        assert r.upper is not None
+        unit = r.upper.preferred_unit
+
+    return gvutils.Temperature(degrees_c=degrees_c, preferred_unit=unit)
+
+
 @dataclasses.dataclass
-class NotificationReport:
-    """Stores out-of-range thermometer data."""
-    temperatures: typing.List[TemperatureEvent]
-    humidities: typing.List[FloatEvent]
-    min_battery: int
+class EventStats:
+    """Stores statistics for a sequence of `Event`s."""
+    max_event: gvutils.Event[float]
+    min_event: gvutils.Event[float]
+    average: float
 
 
-def get_out_of_range_values(
-    log_path: str,
+@dataclasses.dataclass
+class StatsReport:
+    """
+    Stores statistics for the various properties measured from a single device.
+    """
+    centigrades_stats: typing.List[EventStats]
+    humidity_stats: EventStats
+    min_battery: gvutils.Event[int]
+
+
+def generate_report(
+    log_paths: typing.List[str],
     *,
     after: datetime.datetime,
-    expected_temperatures: gvutils.Range[gvutils.Temperature],
-    expected_humidities: gvutils.Range[float],
-) -> NotificationReport:
+) -> typing.Optional["StatsReport"]:
     """
-    A generator that yields `(timestamp, temperature)` tuples for all logged
-    events in `log_path` after (and including) `after` and that report
-    temperatures outside of the range specified by `min` and `max`.
+    Generates a `StatsReport` from the specified log files for a single device
+    for the time period specified by `after`.
+
+    `log_paths` is expected to be in chronological order already.
+
+    Returns `None` if there are no log events in the specified time period.
     """
-    report = NotificationReport(temperatures=[],
-                                humidities=[],
-                                min_battery=100)
+    log_lines = list(itertools.chain.from_iterable([
+        gvutils.parse_log_lines(log_path, after=after)
+        for log_path in log_paths
+    ]))
+    if not log_lines:
+        return None
 
-    for log_line in gvutils.parse_log_lines(log_path, after=after):
-        temperatures = (gvutils.Temperature(degrees_c=c)
-                        for c in log_line.centigrades)
-        for t in temperatures:
-            result = expected_temperatures.compare(t)
-            if result == gvutils.RangeResult.TOO_LOW:
-                assert expected_temperatures.lower is not None
-                t.preferred_unit = expected_temperatures.lower.preferred_unit
-            elif result == gvutils.RangeResult.TOO_HIGH:
-                assert expected_temperatures.upper is not None
-                t.preferred_unit = expected_temperatures.upper.preferred_unit
-            else:
-                continue
-            report.temperatures.append((log_line.timestamp, t))
+    num_temperatures = len(log_lines[0].centigrades)
 
-        rh = log_line.humidity
-        if expected_humidities.compare(rh) != gvutils.RangeResult.IN_RANGE:
-            report.humidities.append((log_line.timestamp, rh))
+    def make_event_list(
+        log_lines: typing.Sequence[gvutils.LogLine],
+        getter: typing.Callable[[gvutils.LogLine], float],
+    ) -> typing.List[gvutils.Event[float]]:
+        return [gvutils.Event(timestamp=line.timestamp, value=getter(line))
+                for line in log_lines]
 
-        report.min_battery = min(report.min_battery, log_line.battery)
+    def get_centigrade(i: int, log_line: gvutils.LogLine) -> float:
+        return log_line.centigrades[i]
 
-    return report
+    def get_humidity(log_line: gvutils.LogLine) -> float:
+        return log_line.humidity
+
+    def get_battery(log_line: gvutils.LogLine) -> int:
+        return log_line.battery
+
+    def event_value(event: gvutils.Event[float]) -> float:
+        return event.value
+
+    def stats_from_event_list(
+        event_list: typing.List[gvutils.Event[float]],
+    ) -> EventStats:
+        return EventStats(
+            max_event=max(event_list, key=event_value),
+            min_event=min(event_list, key=event_value),
+            average=gvutils.average_over_time(event_list),
+        )
+
+    centigrades_stats = []
+    for i in range(num_temperatures):
+        centigrades = make_event_list(log_lines,
+                                      functools.partial(get_centigrade, i))
+        centigrades_stats.append(stats_from_event_list(centigrades))
+
+    humidity_stats = stats_from_event_list(make_event_list(log_lines,
+                                                           get_humidity))
+
+    min_battery_line = min(log_lines, key=get_battery)
+    min_battery = gvutils.Event(timestamp=min_battery_line.timestamp,
+                                value=min_battery_line.battery)
+
+    # TODO: Measure/estimate amount of time above threshold temperature?
+    return StatsReport(centigrades_stats=centigrades_stats,
+                       humidity_stats=humidity_stats,
+                       min_battery=min_battery)
+
+
+def format_report(
+    report: StatsReport,
+    *,
+    device: gvutils.DeviceConfig,
+    utc: bool,
+) -> typing.List[str]:
+    """
+    Generates printable output, as a sequence of lines, from a `StatsReport`
+    for a single device.
+    """
+    reason_lines: typing.List[str] = []
+
+    for centigrade_stats in report.centigrades_stats:
+        # TODO: Get individual temperature range
+        temp_range = device.expected_temperatures
+
+        reason_lines += format_subreport(
+            label="Temperature",
+            expected_range=temp_range,
+            stats=centigrade_stats,
+            transform=functools.partial(temperature_for_range, temp_range),
+            utc=utc,
+        )
+
+    reason_lines += format_subreport(
+        label="Humidity",
+        expected_range=device.expected_humidities,
+        stats=report.humidity_stats,
+        format_value=lambda rh: f"{rh:.1f}%",
+        utc=utc,
+    )
+
+    if (device.min_battery is not None
+            and report.min_battery.value < device.min_battery):
+        timestamp = gvutils.format_timestamp(report.min_battery.timestamp,
+                                             utc=utc)
+        reason_lines.append(
+            f"  Battery level below {device.min_battery}%: "
+            f"{report.min_battery.value}% ({timestamp})",
+        )
+
+    return reason_lines
+
+
+def format_subreport(
+    *,
+    label: str,
+    expected_range: gvutils.Range[typing.Any],
+    stats: EventStats,
+    transform: typing.Optional[typing.Callable[[float], typing.Any]] = None,
+    format_value: typing.Callable[[typing.Any], str] = str,
+    utc: bool,
+) -> typing.List[str]:
+    """
+    Generates printable output, as a sequence of lines, from the `EventStats`
+    for a single property from a single device.
+
+    `transform`, if specified, is used to convert `float` values from
+    `EventStats` to the type used by `expected_range`.
+
+    `format_value`, if specified, is used to control how values (after being
+    transformed, if necessary) should be formatted as strings.
+    """
+    reason_lines: typing.List[str] = []
+
+    transform = transform or (lambda x: x)
+
+    min_value = transform(stats.min_event.value)
+    max_value = transform(stats.max_event.value)
+
+    is_out_of_range = (
+           (    expected_range.lower is not None  # noqa: E126,E128,E131,E201
+            and min_value < expected_range.lower)  # noqa: E126,E128,E131,E201
+        or (    expected_range.upper is not None  # noqa: E126,E128,E131,E201
+            and max_value > expected_range.upper)  # noqa: E126,E128,E131,E201
+    )
+
+    if not is_out_of_range:
+        return reason_lines
+
+    if (expected_range.lower is not None
+            and expected_range.upper is not None):
+        range_description = (f"out of range "
+                             f"[{format_value(expected_range.lower)}, "
+                             f"{format_value(expected_range.upper)}]")
+    elif expected_range.upper is not None:
+        range_description = f"above {format_value(expected_range.upper)}"
+    elif expected_range.lower is not None:
+        range_description = f"below {format_value(expected_range.lower)}"
+    else:
+        assert False
+
+    reason_lines.append(f"  {label} {range_description}:")
+
+    def append_reason(
+        label: str,
+        value: typing.Any,
+        timestamp: datetime.datetime,
+    ) -> None:
+        formatted_timestamp = gvutils.format_timestamp(timestamp, utc=utc)
+        reason_lines.append(f"    {label}: {value} {formatted_timestamp}")
+
+    append_reason("Minimum",
+                  f"{format_value(min_value)}",
+                  stats.min_event.timestamp)
+    append_reason("Maximum",
+                  f"{format_value(max_value)}",
+                  stats.max_event.timestamp)
+
+    reason_lines.append(
+        f"    Average: {format_value(transform(stats.average))}",
+    )
+
+    return reason_lines
 
 
 _epilog = f"""\
@@ -233,6 +409,8 @@ def main(argv: typing.List[str]) -> int:
         raise gvutils.AbortError(f"No log files found in {log_directory}")
 
     now = datetime.datetime.now(tz=datetime.timezone.utc)
+    if not args.utc:
+        now = now.astimezone()
 
     delta = (parse_duration(args.past)
              if args.past
@@ -243,12 +421,12 @@ def main(argv: typing.List[str]) -> int:
     year_month = (start.year, start.month)
     while True:
         for (address, log_file) in log_table.get(year_month, {}).items():
-            recent_logs.setdefault(address, []).append(log_file)
+            recent_logs.setdefault(address, []).append(os.path.join(log_directory, log_file))
         if year_month == (now.year, now.month):
             break
         year_month = next_month(year_month)
 
-    flagged: typing.Dict[str, typing.List[TemperatureEvent]] = {}
+    message_lines: typing.List[str] = []
     for (address, log_list) in recent_logs.items():
         device = config.devices.get(address)
         if not device:
@@ -259,44 +437,20 @@ def main(argv: typing.List[str]) -> int:
                 and device.min_battery is not None):
             continue
 
-        for log_file in log_list:
-            report = get_out_of_range_values(
-                os.path.join(log_directory, log_file),
-                after=start,
-                expected_temperatures=device.expected_temperatures,
-                expected_humidities=device.expected_humidities,
-            )
+        report = generate_report(log_list, after=start)
+        if not report:
+            continue
 
-            # TODO: Rewrite this for humidity and battery.
-            if report.temperatures:
-                flagged[device.address] = report.temperatures
-
-    message_lines: typing.List[str] = []
-    for (address, data) in flagged.items():
-        device = config.devices[address]
-
-        r = device.expected_temperatures
-
-        if r.lower is not None and r.upper is not None:
-            reason = f"Temperatures out of range {r}"
-        elif r.upper is not None:
-            reason = f"Temperatures above {r.upper}"
-        elif r.lower is not None:
-            reason = f"Temperatures below {r.lower}"
-        else:
-            assert False
-
-        message_lines.append(f"{device}: {reason}:")
-        for (timestamp, temperature) in data:
-            timestamp = timestamp.astimezone(datetime.timezone.utc
-                                             if args.utc else None)
-            message_lines.append(f"  {timestamp} {temperature}")
-        message_lines.append("")
+        reason_lines = format_report(report, device=device, utc=args.utc)
+        if reason_lines:
+            message_lines.append(f"{device}:")
+            message_lines += reason_lines
 
     if not message_lines:
         return 0
 
-    message = "\n".join(message_lines)
+    message = "\n".join(itertools.chain((f"{start} to {now}:", ""),
+                                        message_lines))
     if args.dry_run or not command:
         print(message)
         return 0

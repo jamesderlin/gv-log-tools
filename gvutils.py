@@ -27,6 +27,7 @@ import dataclasses
 import datetime
 import enum
 import functools
+import io
 import os
 import re
 import sys
@@ -292,7 +293,6 @@ class Config:
             map_file = os.path.expanduser(common_section.get("map_file") or "")
             if map_file:
                 try:
-                    # pylint: disable=consider-using-with
                     f = open(map_file, encoding="utf-8")
                 except OSError as e:
                     raise AbortError(f"Failed to parse {map_file}: "
@@ -445,6 +445,10 @@ class LogLine:
 
     @staticmethod
     def parse(line: str) -> "LogLine":
+        """
+        Returns a `LogLine` object parsed from a single line of a
+        GoveeBTTempLogger log file.
+        """
         match = log_line_re.match(line)
         if not match:
             raise ValueError(f"Failed to parse log line: {line}")
@@ -468,6 +472,7 @@ class LogLine:
                        centigrades=centigrades,
                        humidity=humidity,
                        battery=battery)
+
 
 def parse_log_lines(
     log_path: str,
@@ -569,13 +574,6 @@ class Temperature:
             return f"{fahrenheit_from_centigrade(self.degrees_c):.2f}F"
 
 
-class RangeResult(enum.Enum):
-    """A result from `Range.compare`."""
-    TOO_LOW = enum.auto()
-    IN_RANGE = enum.auto()
-    TOO_HIGH = enum.auto()
-
-
 @dataclasses.dataclass
 class Range(typing.Generic[T]):
     """An inclusive range."""
@@ -586,18 +584,51 @@ class Range(typing.Generic[T]):
         assert (self.lower is None or self.upper is None
                 or self.lower <= self.upper)  # type: ignore
 
-    def compare(self, value: T) -> RangeResult:
-        """Checks if the specified value is within the range."""
-        # XXX: Ignore type checks until there's a built-in `Comparable` type.
-        if self.lower is not None and value < self.lower:  # type: ignore
-            return RangeResult.TOO_LOW
-        if self.upper is not None and value > self.upper:  # type: ignore
-            return RangeResult.TOO_HIGH
-        return RangeResult.IN_RANGE
-
     def is_set(self) -> bool:
         """Returns `True` if the `Range` object has at least one bound set."""
         return self.lower is not None or self.upper is not None
 
     def __str__(self) -> str:
         return f"[{self.lower}, {self.upper}]"
+
+
+@dataclasses.dataclass
+class Event(typing.Generic[T]):
+    """A log event, which consists of a value and its associated timestamp."""
+    timestamp: datetime.datetime
+    value: T
+
+    def __str__(self) -> str:
+        return f"{self.timestamp}: {self.value}"
+
+
+def average_over_time(data: typing.Sequence[Event[float]]) -> float:
+    """
+    Computes the average value from a sequence of `Event`s.
+
+    `data` must already be sorted in chronological order from oldest to newest.
+
+    Returns `NaN` if `data` is empty.
+    """
+    n = len(data)
+    if n == 0:
+        return float("NaN")
+    elif n == 1:
+        return data[0].value
+
+    area: float = 0
+    for i in range(1, n):
+        seconds = (data[i].timestamp - data[i - 1].timestamp).total_seconds()
+        assert seconds >= 0
+        area += seconds * ((data[i].value + data[i - 1].value) / 2)
+
+    return area / (data[n - 1].timestamp - data[0].timestamp).total_seconds()
+
+
+def format_timestamp(
+    timestamp: datetime.datetime,
+    *,
+    utc: bool,
+) -> str:
+    """Formats a timestamp as a string."""
+    return str(timestamp.astimezone(datetime.timezone.utc if utc else None))
