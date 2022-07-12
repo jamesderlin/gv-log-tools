@@ -113,14 +113,11 @@ def get_out_of_range_values(
     events in `log_path` after (and including) `after` and that report
     temperatures outside of the range specified by `min` and `max`.
     """
-    def is_after(timestamp: datetime.datetime) -> bool:
-        return timestamp >= after
-
     report = NotificationReport(temperatures=[],
                                 humidities=[],
                                 min_battery=100)
 
-    for log_line in gvutils.parse_log_lines(log_path, is_after):
+    for log_line in gvutils.parse_log_lines(log_path, after=after):
         temperatures = (gvutils.Temperature(degrees_c=c)
                         for c in log_line.centigrades)
         for t in temperatures:

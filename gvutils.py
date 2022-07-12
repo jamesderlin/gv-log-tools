@@ -32,6 +32,8 @@ import re
 import sys
 import typing
 
+import bisect_file
+
 
 bluetooth_address_re = re.compile(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}")
 
@@ -437,44 +439,55 @@ class LogLine:
     humidity: float
     battery: int
 
+    @staticmethod
+    def parse(line: str) -> "LogLine":
+        match = log_line_re.match(line)
+        if not match:
+            raise ValueError(f"Failed to parse log line: {line}")
+
+        timestamp = \
+            (datetime.datetime.fromisoformat(match.group("timestamp"))
+             .replace(tzinfo=datetime.timezone.utc))
+
+        centigrades = [
+            float(match.group("centigrade")),
+            *(float(s)
+              for s in (match.group(f"centigrade{i}")
+                        for i in range(2, 5))
+              if s),
+        ]
+
+        humidity = float(match.group("humidity"))
+        battery = int(match.group("battery"))
+
+        return LogLine(timestamp=timestamp,
+                       centigrades=centigrades,
+                       humidity=humidity,
+                       battery=battery)
 
 def parse_log_lines(
     log_path: str,
-    predicate: typing.Optional[typing.Callable[[datetime.datetime],
-                                               bool]] = None,
+    after: typing.Optional[datetime.datetime] = None,
 ) -> typing.Generator[LogLine, None, None]:
     """
     A generator that yields a `LogLine` for each line in the file specified by
-    `log_path` if calling `predicate` on the line's timestamp returns `True`.
+    `log_path`.  If `after` is specified, yields only log events that occurred
+    on or after that time.
     """
-    with open(log_path) as f:
+    def get_timestamp(line: str) -> datetime.datetime:
+        match = log_line_re.match(line)
+        if not match:
+            raise ValueError(f"Failed to parse log line: {line}")
+        return (datetime.datetime.fromisoformat(match.group("timestamp"))
+                .replace(tzinfo=datetime.timezone.utc))
+
+    with (bisect_file.bisect_file_left(log_path, after, key=get_timestamp)
+          if after else open(log_path)) as f:
         for line in f:
-            match = log_line_re.match(line)
-            if not match:
+            line = line.rstrip()
+            if not line:
                 continue
-
-            timestamp = \
-                (datetime.datetime.fromisoformat(match.group("timestamp"))
-                 .replace(tzinfo=datetime.timezone.utc))
-
-            if predicate is not None and not predicate(timestamp):
-                continue
-
-            centigrades = [
-                float(match.group("centigrade")),
-                *(float(s)
-                  for s in (match.group(f"centigrade{i}")
-                            for i in range(2, 5))
-                  if s),
-            ]
-
-            humidity = float(match.group("humidity"))
-            battery = int(match.group("battery"))
-
-            yield LogLine(timestamp=timestamp,
-                          centigrades=centigrades,
-                          humidity=humidity,
-                          battery=battery)
+            yield LogLine.parse(line)
 
 
 def fahrenheit_from_centigrade(degrees_c: float) -> float:
@@ -505,8 +518,8 @@ class Temperature:
         self.degrees_c = degrees_c
         self.preferred_unit = preferred_unit
 
-    @classmethod
-    def parse(cls, s: str) -> "Temperature":
+    @staticmethod
+    def parse(s: str) -> "Temperature":
         """
         Returns a `Temperature` object parsed from a string.
 
