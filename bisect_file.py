@@ -28,7 +28,12 @@ def _linear_search_file(
         if not line:
             break
 
-        k = key(line)
+        try:
+            k = key(line)
+        except ValueError as e:
+            if not line.rstrip():
+                continue
+            raise e from None
 
         # XXX: Ignore type checks until there's a built-in `Comparable` type.
         if value <= k:  # type: ignore
@@ -68,19 +73,26 @@ def _bisect_file_left(
         # the incomplete portion so that we can read the next line
         # whole.
         file.readline()
-        mid = file.tell()
-        if file.tell() < end:
-            line = file.readline().decode(encoding=encoding)
-        else:
-            # We read the (possibly incomplete) last line in the
-            # interval.  We can't tell if `mid` started in the middle
-            # of a line or not, so read lines sequentially from the
-            # start, which is expected to always be the start of a
-            # line.
-            file.seek(start, os.SEEK_SET)
-            return _linear_search_file(file, value, key=key, encoding=encoding)
 
-        k = key(line)
+        while True:
+            mid = file.tell()
+            if file.tell() < end:
+                line = file.readline().decode(encoding=encoding)
+            else:
+                # We read the (possibly incomplete) last line in the interval.
+                # We can't tell if `mid` started in the middle of a line or
+                # not, so read lines sequentially from the start, which is
+                # expected to always be the start of a line.
+                file.seek(start, os.SEEK_SET)
+                return _linear_search_file(file, value, key=key, encoding=encoding)
+
+            try:
+                k = key(line)
+                break
+            except ValueError as e:
+                if not line.rstrip():
+                    continue
+                raise e from None
 
         # XXX: Ignore type checks until there's a built-in `Comparable` type.
         if value < k:  # type: ignore
