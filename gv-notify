@@ -93,6 +93,16 @@ def parse_duration(s: str) -> datetime.timedelta:
         raise ValueError(f"Failed to parse a duration from \"{s}\"") from e
 
 
+def next_month(year_month: typing.Tuple[int, int]) -> typing.Tuple[int, int]:
+    """
+    Returns a `(year, month)` tuple representing the next month after the
+    specified `(year, month)` tuple.
+    """
+    (year, month) = year_month
+    month += 1
+    return (year + int(month > 12), (month - 1) % 12 + 1)
+
+
 @dataclasses.dataclass
 class NotificationReport:
     """Stores out-of-range thermometer data."""
@@ -229,13 +239,14 @@ def main(argv: typing.List[str]) -> int:
              else datetime.timedelta(minutes=15))
     start = now - delta
 
-    recent_logs = {address: [log_file]
-                   for (address, log_file)
-                   in log_table.get((start.year, start.month), {}).items()}
-    if start.month != now.month:
-        for (address, log_file) in log_table.get((now.year, now.month),
-                                                 {}).items():
+    recent_logs: typing.Dict[str, typing.List[str]] = {}
+    year_month = (start.year, start.month)
+    while True:
+        for (address, log_file) in log_table.get(year_month, {}).items():
             recent_logs.setdefault(address, []).append(log_file)
+        if year_month == (now.year, now.month):
+            break
+        year_month = next_month(year_month)
 
     flagged: typing.Dict[str, typing.List[TemperatureEvent]] = {}
     for (address, log_list) in recent_logs.items():
