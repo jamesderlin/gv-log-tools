@@ -250,7 +250,10 @@ def main(argv: typing.List[str]) -> int:
 
     flagged: typing.Dict[str, typing.List[TemperatureEvent]] = {}
     for (address, log_list) in recent_logs.items():
-        device = config.devices[address]
+        device = config.devices.get(address)
+        if not device:
+            continue
+
         if (not device.expected_temperatures.is_set()
                 and not device.expected_humidities.is_set()
                 and device.min_battery is not None):
