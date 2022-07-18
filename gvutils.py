@@ -92,6 +92,10 @@ def has_python_version(
     specified version, `False` otherwise.
     """
     if sys.version_info < version_tuple:
+        # Since this function must run on older Python versions, it cannot use
+        # f-strings.
+        #
+        # pylint: disable=consider-using-f-string
         print("{name}: Requires Python {version} or greater."
               .format(name=script_file,
                       version=".".join((str(i) for i in version_tuple))),
@@ -232,7 +236,7 @@ class Config:
             if not os.path.isfile(self.config_file_path):
                 return
 
-        with open(self.config_file_path) as f:
+        with open(self.config_file_path, encoding="utf-8") as f:
             # Try to parse the config file first as GoveeBTTempLogger's
             # `gvh-titlemap.txt` format.
             device_configs = parse_map_file(f)
@@ -289,7 +293,7 @@ class Config:
             if map_file:
                 try:
                     # pylint: disable=consider-using-with
-                    f = open(map_file)
+                    f = open(map_file, encoding="utf-8")
                 except OSError as e:
                     raise AbortError(f"Failed to parse {map_file}: "
                                      f"{e.strerror}") from e
@@ -481,8 +485,10 @@ def parse_log_lines(
         return (datetime.datetime.fromisoformat(match.group("timestamp"))
                 .replace(tzinfo=datetime.timezone.utc))
 
-    with (bisect_file.bisect_file_left(log_path, after, key=get_timestamp)
-          if after else open(log_path)) as f:
+    with typing.cast(
+        io.TextIOWrapper,
+        bisect_file.bisect_file_left(log_path, after, key=get_timestamp),
+    ) if after else open(log_path, encoding="utf-8") as f:
         for line in f:
             line = line.rstrip()
             if not line:
