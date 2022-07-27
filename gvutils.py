@@ -298,6 +298,12 @@ class Config:
             default_max_temperature = parse_entry(common_section_name,
                                                   "max_temperature",
                                                   Temperature.parse)
+            default_min_humidity = parse_entry(common_section_name,
+                                               "min_humidity",
+                                               parse_percentage)
+            default_max_humidity = parse_entry(common_section_name,
+                                               "max_humidity",
+                                               parse_percentage)
             default_min_battery = parse_entry(common_section_name,
                                               "min_battery",
                                               parse_percentage)
@@ -328,6 +334,20 @@ class Config:
                 Temperature.parse,
                 default=default_max_temperature,
             )
+
+            device.expected_humidities.lower = parse_entry(
+                section_name,
+                "min_humidity",
+                parse_percentage,
+                default=default_min_humidity,
+            )
+            device.expected_humidities.upper = parse_entry(
+                section_name,
+                "max_humidity",
+                parse_percentage,
+                default=default_max_humidity,
+            )
+
             device.min_battery = parse_entry(
                 section_name,
                 "min_battery",
