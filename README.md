@@ -7,9 +7,9 @@ Bluetooth thermometers.
   in a friendlier format.  Allows viewing logs for the thermometer with the
   specified name and date and prints timestamps in the local timezone.
 
-* `gv-notify`: Generates notifications if a Govee thermometer reports a
-  temperature outside of an expected range.  Expected to be executed
-  periodically (such as via `cron`).
+* `gv-notify`: Generates notifications if a Govee thermometer reports values
+  outside of an expected range.  Expected to be executed periodically (such as
+  via `cron`).
 
 
 ## Installation
@@ -38,6 +38,29 @@ map_file=/var/www/html/goveebttemplogger/gvh-titlemap.txt
 # specified, read logs from the current directory.
 log_directory=/var/log/goveebttemplogger
 
+# Optional.  The default expected temperature range for all thermometers.
+# Temperatures outside of this range will be reported by `gv-notify`.
+# Temperatures may be expressed in Celsius or Fahrenheit.  The range may be
+# expressed by a minimum, a maximum, or both.
+#
+# These entries may be overridden by device-specific ones.
+min_temperature=0C
+max_temperature=40F
+
+# Optional.  The default expected humidity range for all thermometers.
+# Humidity values outside of this range will be reported by `gv-notify`.
+# The range may be expressed by a minimum, a maximum, or both.
+#
+# These entries may be overridden by device-specific ones.
+min_humidity=0%
+max_humidity=100%
+
+# Optional.  The default minimum battery level expected for all devices.
+# Battery levels below this value will be reported by `gv-notify`.
+#
+# This may be overridden by a device-specific entry.
+min_battery=10%
+
 # Configuration for `gv-notify`.
 [notify]
 command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
@@ -47,15 +70,11 @@ command=/usr/bin/mailx -s "Govee thermometer warning" james@example.com
 # Optional.  User-friendly name.
 name=Kitchen Refrigerator
 
-# Optional.  The expected temperature range.  Temperatures outside of this
-# range will be reported by `gv-notify`.  Temperatures may be expressed in
-# Celsius or Fahrenheit.  The range may be expressed by a minimum, a maximum,
-# or both.
-min_temperature=0C
-max_temperature=40F
-
 [A4:C1:38:67:89:AB]
 name=Garage Chest Freezer
+
+# Optional.  A device-specific override for the expected temperature range.
+min_temperature=
 max_temperature=-10C
 ```
 
