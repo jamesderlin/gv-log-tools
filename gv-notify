@@ -369,6 +369,7 @@ def main(argv: typing.List[str]) -> int:
                     help=f"The path to the configuration file.  If "
                          f"not specified, defaults to "
                          f"`{gvutils.Config.default_config_file_path_raw}`.")
+    ap.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the notification to `stdout` instead of "
                          "executing the notify command.")
@@ -386,6 +387,14 @@ def main(argv: typing.List[str]) -> int:
     args = ap.parse_args(argv[1:])
 
     config = gvutils.Config(args.config_file_path)
+    device: typing.Optional[gvutils.DeviceConfig]
+
+    if args.debug:
+        for device in config.devices.values():
+            print(f"{device}:\n"
+                  f"  Expected temperatures: {device.expected_temperatures}\n"
+                  f"  Expected humidities: {device.expected_humidities}\n"
+                  f"  Minimum battery: {device.min_battery}\n")
 
     log_directory = args.log_directory or config.log_directory or os.getcwd()
     if not os.path.isdir(log_directory):
