@@ -225,6 +225,7 @@ class Config:
         self.log_directory = ""
         self.devices: typing.OrderedDict[str, DeviceConfig] = \
             collections.OrderedDict()
+        self.ignored_addresses : typing.Set[str] = set()
 
         self.default_expected_temperatures: Range[Temperature] = \
             Range(None, None)
@@ -333,7 +334,13 @@ class Config:
         for section_name in cp:
             if not bluetooth_address_re.fullmatch(section_name):
                 continue
+
             address = section_name
+
+            if parse_entry(section_name, "ignore", parse_bool):
+                self.ignored_addresses.add(address)
+                continue
+
             name = cp[section_name].get("name")
 
             # Device names from the map file take precedence.

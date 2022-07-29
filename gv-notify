@@ -437,6 +437,9 @@ def main(argv: typing.List[str]) -> int:
 
     message_lines: typing.List[str] = []
     for (address, log_list) in recent_logs.items():
+        if address in config.ignored_addresses:
+            continue
+
         device = config.devices.get(address)
         if not device:
             device = gvutils.DeviceConfig(address=address)

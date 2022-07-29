@@ -113,7 +113,7 @@ def main(argv: typing.List[str]) -> int:
     # Merge found addresses into the ones specified by the configuration
     # file.
     for address in sorted(addresses.keys()):
-        if address in config.devices:
+        if address in config.devices or address in config.ignored_addresses:
             continue
         config.devices[address] = gvutils.DeviceConfig(address=address)
 
