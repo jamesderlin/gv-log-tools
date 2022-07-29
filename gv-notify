@@ -439,10 +439,13 @@ def main(argv: typing.List[str]) -> int:
     for (address, log_list) in recent_logs.items():
         device = config.devices.get(address)
         if not device:
-            continue
+            device = gvutils.DeviceConfig(address=address)
+            device.expected_temperatures = config.default_expected_temperatures
+            device.expected_humidities = config.default_expected_humidities
+            device.min_battery = config.default_min_battery
 
-        if (not device.expected_temperatures.is_set()
-                and not device.expected_humidities.is_set()
+        if (not device.expected_temperatures.has_bound()
+                and not device.expected_humidities.has_bound()
                 and device.min_battery is not None):
             continue
 

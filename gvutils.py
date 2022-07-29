@@ -226,6 +226,11 @@ class Config:
         self.devices: typing.OrderedDict[str, DeviceConfig] = \
             collections.OrderedDict()
 
+        self.default_expected_temperatures: Range[Temperature] = \
+            Range(None, None)
+        self.default_expected_humidities: Range[float] = Range(None, None)
+        self.default_min_battery = None
+
         if path:
             if not os.path.isfile(path):
                 raise AbortError(f"File not found: {path}")
@@ -275,9 +280,6 @@ class Config:
                 raise AbortError(f"{e} (for `{key}` in section [{section}] in "
                                  f"{self.config_file_path})") from e
 
-        default_min_temperature = None
-        default_max_temperature = None
-
         # For backward compatibility with the old section name.
         common_section_name = next((name
                                     for name in ("common", "config")
@@ -301,21 +303,29 @@ class Config:
                     self.devices = (parse_map_file(f)
                                     or collections.OrderedDict())
 
-            default_min_temperature = parse_entry(common_section_name,
-                                                  "min_temperature",
-                                                  Temperature.parse)
-            default_max_temperature = parse_entry(common_section_name,
-                                                  "max_temperature",
-                                                  Temperature.parse)
-            default_min_humidity = parse_entry(common_section_name,
-                                               "min_humidity",
-                                               parse_percentage)
-            default_max_humidity = parse_entry(common_section_name,
-                                               "max_humidity",
-                                               parse_percentage)
-            default_min_battery = parse_entry(common_section_name,
-                                              "min_battery",
-                                              parse_percentage)
+            self.default_expected_temperatures.lower = parse_entry(
+                common_section_name,
+                "min_temperature",
+                Temperature.parse,
+            )
+            self.default_expected_temperatures.upper = parse_entry(
+                common_section_name,
+                "max_temperature",
+                Temperature.parse,
+            )
+            self.default_expected_humidities.lower = parse_entry(
+                common_section_name,
+                "min_humidity",
+                parse_percentage,
+            )
+            self.default_expected_humidities.upper = parse_entry(
+                common_section_name,
+                "max_humidity",
+                parse_percentage,
+            )
+            self.default_min_battery = parse_entry(common_section_name,
+                                                   "min_battery",
+                                                   parse_percentage)
 
         if cp.has_section("notify"):
             self.notify_command = cp["notify"].get("command")
@@ -335,33 +345,33 @@ class Config:
                 section_name,
                 "min_temperature",
                 Temperature.parse,
-                default=default_min_temperature,
+                default=self.default_expected_temperatures.lower,
             )
             device.expected_temperatures.upper = parse_entry(
                 section_name,
                 "max_temperature",
                 Temperature.parse,
-                default=default_max_temperature,
+                default=self.default_expected_temperatures.upper,
             )
 
             device.expected_humidities.lower = parse_entry(
                 section_name,
                 "min_humidity",
                 parse_percentage,
-                default=default_min_humidity,
+                default=self.default_expected_humidities.lower,
             )
             device.expected_humidities.upper = parse_entry(
                 section_name,
                 "max_humidity",
                 parse_percentage,
-                default=default_max_humidity,
+                default=self.default_expected_humidities.upper,
             )
 
             device.min_battery = parse_entry(
                 section_name,
                 "min_battery",
                 parse_percentage,
-                default=default_min_battery,
+                default=self.default_min_battery,
             )
 
 
@@ -584,7 +594,7 @@ class Range(typing.Generic[T]):
         assert (self.lower is None or self.upper is None
                 or self.lower <= self.upper)  # type: ignore
 
-    def is_set(self) -> bool:
+    def has_bound(self) -> bool:
         """Returns `True` if the `Range` object has at least one bound set."""
         return self.lower is not None or self.upper is not None
 
